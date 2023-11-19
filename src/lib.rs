@@ -4,7 +4,7 @@
 //  Created:
 //    18 Nov 2023, 12:57:56
 //  Last edited:
-//    18 Nov 2023, 13:17:39
+//    19 Nov 2023, 19:43:27
 //  Auto updated?
 //    Yes
 //
@@ -13,24 +13,23 @@
 //!   schema- or specification-like struct to multiple versions of itself.
 //
 
-use std::cell::RefCell;
-use std::thread_local;
+mod versioning;
 
 use proc_macro::TokenStream;
+use syn::{parse_macro_input, DataStruct};
 
-
-/***** GLOBALS *****/
-thread_local! {
-    static TEST: RefCell<Option<TokenStream>> = RefCell::new(None);
-}
-
-
-
+// TODO: make custom parse type for "statements" in our little DSL
 
 
 /***** MACROS *****/
-#[proc_macro_attribute]
-pub fn versioning(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    TEST.with(|test| *test.borrow_mut() = Some(item));
-    TokenStream::new()
+#[inline]
+#[proc_macro]
+pub fn versioning(input: TokenStream) -> TokenStream {
+    // Parse the input as a data thing
+    let data: DataStruct = parse_macro_input!(input);
+
+    match versioning::call(item.into()) {
+        Ok(res) => res.into(),
+        Err(err) => err.abort(),
+    }
 }

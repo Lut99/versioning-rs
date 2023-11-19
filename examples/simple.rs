@@ -4,7 +4,7 @@
 //  Created:
 //    18 Nov 2023, 13:06:17
 //  Last edited:
-//    18 Nov 2023, 13:07:32
+//    19 Nov 2023, 19:22:23
 //  Auto updated?
 //    Yes
 //
@@ -16,8 +16,9 @@ use versioning::versioning;
 
 
 /***** SCHEMA *****/
-#[versioning(test)]
-pub struct FileDefinition {}
+versioning! {
+    pub struct FileDefinition {}
+}
 
 
 
