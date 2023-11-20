@@ -4,7 +4,7 @@
 //  Created:
 //    18 Nov 2023, 13:06:17
 //  Last edited:
-//    19 Nov 2023, 19:22:23
+//    20 Nov 2023, 13:58:44
 //  Auto updated?
 //    Yes
 //
@@ -12,12 +12,30 @@
 //!   Showcases a simple usage of the [`versioning`] crate.
 //
 
-use versioning::versioning;
-
 
 /***** SCHEMA *****/
-versioning! {
-    pub struct FileDefinition {}
+pub mod take1 {
+    use versioning::versioned;
+
+    #[versioned("v1_0_0", "v2_0_0")]
+    mod defs {
+        #[version("v1_0_0")]
+        pub struct FileDefinition {}
+    }
+}
+
+pub mod take2 {
+    use versioning::versioned;
+
+    #[versioned("v1_0_0", "v2_0_0")]
+    pub enum FileDefinition2 {}
+}
+
+pub mod take3 {
+    use versioning::versioned;
+
+    #[versioned("v1_0_0", "v2_0_0")]
+    pub struct FileDefinition3 {}
 }
 
 

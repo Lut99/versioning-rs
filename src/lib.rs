@@ -4,7 +4,7 @@
 //  Created:
 //    18 Nov 2023, 12:57:56
 //  Last edited:
-//    19 Nov 2023, 19:43:27
+//    20 Nov 2023, 13:26:45
 //  Auto updated?
 //    Yes
 //
@@ -13,22 +13,26 @@
 //!   schema- or specification-like struct to multiple versions of itself.
 //
 
-mod versioning;
+mod spec;
+mod versioned;
 
 use proc_macro::TokenStream;
-use syn::{parse_macro_input, DataStruct};
-
-// TODO: make custom parse type for "statements" in our little DSL
 
 
 /***** MACROS *****/
+/// Defines the attribute macro that declares a particular module as having versioned definitions inside of it.
+///
+/// # Arguments
+/// - `attr`: The tokens given in the attribute, i.e., the stuff in between the brackets in `#[versioned(...)]`.
+/// - `input`: The tokens that are being attributed. This defines the versioned region.
+///
+/// # Returns
+/// A new [`TokenStream`] replacing the `input`.
 #[inline]
-#[proc_macro]
-pub fn versioning(input: TokenStream) -> TokenStream {
-    // Parse the input as a data thing
-    let data: DataStruct = parse_macro_input!(input);
-
-    match versioning::call(item.into()) {
+#[proc_macro_attribute]
+#[proc_macro_error::proc_macro_error]
+pub fn versioned(attr: TokenStream, input: TokenStream) -> TokenStream {
+    match versioned::call(attr.into(), input.into()) {
         Ok(res) => res.into(),
         Err(err) => err.abort(),
     }
