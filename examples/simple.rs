@@ -4,7 +4,7 @@
 //  Created:
 //    18 Nov 2023, 13:06:17
 //  Last edited:
-//    20 Nov 2023, 13:58:44
+//    21 Nov 2023, 22:41:51
 //  Auto updated?
 //    Yes
 //
@@ -15,9 +15,9 @@
 
 /***** SCHEMA *****/
 pub mod take1 {
-    use versioning::versioned;
+    use versioning::versioning;
 
-    #[versioned("v1_0_0", "v2_0_0")]
+    #[versioning("v1_0_0", "v2_0_0")]
     mod defs {
         #[version("v1_0_0")]
         pub struct FileDefinition {}
@@ -25,16 +25,18 @@ pub mod take1 {
 }
 
 pub mod take2 {
-    use versioning::versioned;
+    use versioning::versioning;
 
-    #[versioned("v1_0_0", "v2_0_0")]
+    #[versioning("v1_0_0", "v2_0_0")]
+    #[version(any("v1_0_0", "v2_0_0"))]
     pub enum FileDefinition2 {}
 }
 
 pub mod take3 {
-    use versioning::versioned;
+    use versioning::versioning;
 
-    #[versioned("v1_0_0", "v2_0_0")]
+    #[versioning("v1_0_0", "v2_0_0")]
+    #[version(all("v1_0_0", not("v2_0_0")))]
     pub struct FileDefinition3 {}
 }
 

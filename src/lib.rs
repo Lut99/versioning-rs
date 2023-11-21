@@ -4,7 +4,7 @@
 //  Created:
 //    18 Nov 2023, 12:57:56
 //  Last edited:
-//    20 Nov 2023, 13:26:45
+//    21 Nov 2023, 22:12:29
 //  Auto updated?
 //    Yes
 //
@@ -14,7 +14,8 @@
 //
 
 mod spec;
-mod versioned;
+mod version;
+mod versioning;
 
 use proc_macro::TokenStream;
 
@@ -31,8 +32,8 @@ use proc_macro::TokenStream;
 #[inline]
 #[proc_macro_attribute]
 #[proc_macro_error::proc_macro_error]
-pub fn versioned(attr: TokenStream, input: TokenStream) -> TokenStream {
-    match versioned::call(attr.into(), input.into()) {
+pub fn versioning(attr: TokenStream, input: TokenStream) -> TokenStream {
+    match versioning::call(attr.into(), input.into()) {
         Ok(res) => res.into(),
         Err(err) => err.abort(),
     }

@@ -1,10 +1,10 @@
-//  VERSIONED.rs
+//  VERSIONING.rs
 //    by Lut99
 //
 //  Created:
 //    19 Nov 2023, 19:25:25
 //  Last edited:
-//    20 Nov 2023, 14:02:12
+//    21 Nov 2023, 22:39:41
 //  Auto updated?
 //    Yes
 //
@@ -16,9 +16,10 @@ use proc_macro2::{Span, TokenStream as TokenStream2};
 use proc_macro_error::{Diagnostic, Level};
 use quote::quote;
 use syn::spanned::Spanned;
-use syn::{Attribute, Ident, Visibility};
+use syn::{Attribute, Ident, Meta, Visibility};
 
-use crate::spec::{Body, BodyItem, Version, VersionFilterList, VersionList};
+use crate::spec::{Body, BodyItem};
+use crate::version::{Version, VersionFilter, VersionList};
 
 
 /***** HELPER FUNCTIONS *****/
@@ -29,7 +30,28 @@ use crate::spec::{Body, BodyItem, Version, VersionFilterList, VersionList};
 ///
 /// # Returns
 /// The [`VersionFilterList`] specified in the `#[version(...)]`-macro if it was found, or else [`None`] if the macro wasn't given.
-pub fn get_version_attr(attrs: &[Attribute]) -> Result<Option<VersionFilterList>, Diagnostic> { Ok(None) }
+pub fn get_version_attr(attrs: &[Attribute]) -> Result<Option<VersionFilter>, Diagnostic> {
+    // Iterate over the attributes
+    for attr in attrs {
+        match &attr.meta {
+            Meta::List(l) => {
+                if l.path.is_ident("version") {
+                    return match l.parse_args() {
+                        Ok(filter) => Ok(Some(filter)),
+                        Err(err) => Err(Diagnostic::spanned(err.span(), Level::Error, err.to_string())),
+                    };
+                } else {
+                    // Not ours, ignore
+                    continue;
+                }
+            },
+            // Not ours, ignore
+            Meta::NameValue(_) => continue,
+            Meta::Path(_) => continue,
+        }
+    }
+    Ok(None)
+}
 
 /// Filters the given body item in accordance to the list of versions.
 ///
@@ -46,7 +68,9 @@ pub fn filter_item(item: &BodyItem, versions: &VersionList, version: &Version) -
         BodyItem::Enum(e) => &e.attrs,
         BodyItem::Struct(s) => &s.attrs,
     };
-    if let Some(version) = get_version_attr(attrs)? {}
+    if let Some(version) = get_version_attr(attrs)? {
+        println!("{version:#?}");
+    }
 
     // Done
     Ok(quote! {})

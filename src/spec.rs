@@ -4,7 +4,7 @@
 //  Created:
 //    20 Nov 2023, 13:02:02
 //  Last edited:
-//    20 Nov 2023, 13:57:31
+//    21 Nov 2023, 22:14:16
 //  Auto updated?
 //    Yes
 //
@@ -15,45 +15,10 @@
 use proc_macro2::Span;
 use syn::parse::{Parse, ParseBuffer, ParseStream};
 use syn::spanned::Spanned as _;
-use syn::{Item, ItemEnum, ItemMod, ItemStruct, LitStr, Token, Visibility};
+use syn::{Item, ItemEnum, ItemMod, ItemStruct, Visibility};
 
 
 /***** LIBRARY *****/
-/// Wrapper around a string literal to work with them as rudimentary versions.
-#[derive(Clone, Debug)]
-pub struct Version(pub LitStr);
-impl Parse for Version {
-    fn parse(input: ParseStream) -> syn::Result<Self> { Ok(Self(input.parse()?)) }
-}
-
-/// The list of version string literals we want to parse.
-#[derive(Clone, Debug)]
-pub struct VersionList(pub Vec<Version>);
-impl Parse for VersionList {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        Ok(Self(input.call(|buf: &ParseBuffer| -> syn::Result<Vec<Version>> {
-            let mut res: Vec<Version> = vec![];
-            while !buf.is_empty() {
-                // Attempt to parse the next
-                res.push(buf.parse()?);
-                // Pop at least one comma if the buffer isn't empty
-                if !buf.is_empty() {
-                    let mut at_least_one: bool = false;
-                    while buf.parse::<Token![,]>().is_ok() {
-                        at_least_one = true;
-                    }
-                    if !at_least_one {
-                        return Err(buf.error("Expected comma"));
-                    }
-                }
-            }
-            Ok(res)
-        })?))
-    }
-}
-
-
-
 /// Defines the toplevel module that we parsed, which lists all the structs and whatnot to version.
 #[derive(Clone, Debug)]
 pub struct Body {
