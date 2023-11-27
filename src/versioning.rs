@@ -4,7 +4,7 @@
 //  Created:
 //    19 Nov 2023, 19:25:25
 //  Last edited:
-//    21 Nov 2023, 22:39:41
+//    27 Nov 2023, 15:55:55
 //  Auto updated?
 //    Yes
 //
@@ -18,7 +18,7 @@ use quote::quote;
 use syn::spanned::Spanned;
 use syn::{Attribute, Ident, Meta, Visibility};
 
-use crate::spec::{Body, BodyItem};
+use crate::spec::BodyItem;
 use crate::version::{Version, VersionFilter, VersionList};
 
 
@@ -63,17 +63,34 @@ pub fn get_version_attr(attrs: &[Attribute]) -> Result<Option<VersionFilter>, Di
 /// # Returns
 /// A new [`TokenStream2`] that encodes the body item but without certain components if filtered out by the version.
 pub fn filter_item(item: &BodyItem, versions: &VersionList, version: &Version) -> Result<TokenStream2, Diagnostic> {
+    println!("Filtering item @ {:?} for version {:?}", item.span(), version);
+
     // First, check the item's attributes to see if it has been version filtered
-    let attrs: &[Attribute] = match item {
-        BodyItem::Enum(e) => &e.attrs,
-        BodyItem::Struct(s) => &s.attrs,
-    };
-    if let Some(version) = get_version_attr(attrs)? {
+    if let Some(version) = get_version_attr(item.attrs())? {
         println!("{version:#?}");
     }
 
-    // Done
-    Ok(quote! {})
+    // Then serialize to quote
+    match item {
+        BodyItem::Module(attrs, vis, name, items, _) => {
+            // Recurse into the contents first
+            let mut filtered: TokenStream2 = TokenStream2::new();
+            for item in items {
+                filtered.extend(filter_item(item, versions, version)?);
+            }
+
+            // Now make the module
+            Ok(quote! {
+                #(#attrs)*
+                #vis mod #name {
+                    #filtered
+                }
+            })
+        },
+
+        BodyItem::Enum(e) => Ok(quote! { #e }),
+        BodyItem::Struct(s) => Ok(quote! { #s }),
+    }
 }
 
 
@@ -101,7 +118,7 @@ pub fn call(attrs: TokenStream2, input: TokenStream2) -> Result<TokenStream2, Di
 
     // Next, parse the input as a module
     let input_span: Span = input.span();
-    let body: Body = match syn::parse2(input) {
+    let body: BodyItem = match syn::parse2(input) {
         Ok(body) => body,
         Err(_) => {
             return Err(Diagnostic::spanned(input_span, Level::Error, "Can only use `#[versioned(...)]` macro on modules, structs or enums".into()));
@@ -112,18 +129,15 @@ pub fn call(attrs: TokenStream2, input: TokenStream2) -> Result<TokenStream2, Di
     // Now examine all of the body items to serialize them appropriately
     let mut impls: Vec<TokenStream2> = Vec::with_capacity(versions.0.len());
     for version in &versions.0 {
-        // Collect the filtered editions of all the items
-        let mut filtered_items: Vec<TokenStream2> = Vec::with_capacity(body.items.len());
-        for item in &body.items {
-            filtered_items.push(filter_item(item, &versions, version)?);
-        }
+        // Collect the filtered editions of this item and all its contents
+        let filtered: TokenStream2 = filter_item(&body, &versions, version)?;
 
         // Generate a module for this version
-        let vis: &Visibility = &body.vis;
+        let vis: &Visibility = body.vis();
         let ident: Ident = Ident::new(&version.0.value(), version.0.span());
         impls.push(quote! {
             #vis mod #ident {
-                #(#filtered_items)*
+                #filtered
             }
         });
     }
