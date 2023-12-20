@@ -4,12 +4,14 @@
 //  Created:
 //    18 Nov 2023, 13:06:17
 //  Last edited:
-//    20 Dec 2023, 15:35:27
+//    20 Dec 2023, 16:14:44
 //  Auto updated?
 //    Yes
 //
 //  Description:
 //!   Showcases a simple usage of the [`versioning`] crate.
+//!
+//!   Tip: use `cargo expand --example simple` to see what this generates :)
 //
 
 
@@ -18,7 +20,7 @@ pub mod take1 {
     use versioning::versioning;
 
     #[versioning("v1_0_0", "v2_0_0")]
-    mod defs {
+    pub(crate) mod defs {
         #[version("v1_0_0")]
         pub struct FileDefinition {}
     }
@@ -44,7 +46,7 @@ pub mod take4 {
     use versioning::versioning;
 
     #[versioning("v1_0_0", "v2_0_0", "v3_0_0")]
-    mod defs {
+    pub(super) mod defs {
         #[version(any("v1_0_0", "v2_0_0"))]
         mod private {
             #[version("v1_0_0")]
@@ -52,7 +54,14 @@ pub mod take4 {
         }
 
         #[version("v1_0_0")]
-        pub struct FileDefinition4a {}
+        pub struct FileDefinition4a {
+            #[allow(dead_code)]
+            nested: private::Nested,
+        }
+        #[version("v1_0_0")]
+        impl FileDefinition4a {
+            pub fn new() -> Self { Self { nested: private::Nested {} } }
+        }
 
         #[version("v2_0_0")]
         pub struct FileDefinition4b {}
@@ -64,4 +73,11 @@ pub mod take4 {
 
 
 /***** ENTRYPOINT *****/
-fn main() {}
+fn main() {
+    // We can now use the generated modules!
+    let _a = take1::v1_0_0::defs::FileDefinition {};
+
+    // Also works with impls, if annotated correctly :)
+    let _b = take4::v1_0_0::defs::FileDefinition4a::new();
+    let _c = take4::v2_0_0::defs::FileDefinition4b {};
+}

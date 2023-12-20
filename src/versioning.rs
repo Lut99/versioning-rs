@@ -4,7 +4,7 @@
 //  Created:
 //    19 Nov 2023, 19:25:25
 //  Last edited:
-//    20 Dec 2023, 15:39:55
+//    20 Dec 2023, 16:33:35
 //  Auto updated?
 //    Yes
 //
@@ -15,9 +15,10 @@
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use proc_macro_error::{Diagnostic, Level};
 use quote::quote;
+use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
-use syn::token::Pub;
-use syn::{Attribute, Ident, Meta, Visibility};
+use syn::token::{Comma, Pub};
+use syn::{Attribute, Field, Fields, Ident, ImplItem, ImplItemConst, ImplItemFn, ImplItemMacro, ImplItemType, Meta, Variant, Visibility};
 
 use crate::spec::BodyItem;
 use crate::version::{Filter as _, Version, VersionFilter, VersionList};
@@ -33,7 +34,7 @@ use crate::version::{Filter as _, Version, VersionFilter, VersionList};
 ///
 /// # Returns
 /// The [`VersionFilterList`] specified in the `#[version(...)]`-macro if it was found, or else [`None`] if the macro wasn't given.
-pub fn remove_version_attr(attrs: &mut Vec<Attribute>) -> Result<Option<(Attribute, VersionFilter)>, Diagnostic> {
+pub fn remove_version_attr(attrs: &mut Vec<Attribute>) -> Result<Option<VersionFilter>, Diagnostic> {
     // Iterate over the attributes
     for (i, attr) in attrs.into_iter().enumerate() {
         match &attr.meta {
@@ -42,7 +43,8 @@ pub fn remove_version_attr(attrs: &mut Vec<Attribute>) -> Result<Option<(Attribu
                     return match l.parse_args() {
                         Ok(filter) => {
                             // Before we return, remove from the list
-                            Ok(Some((attrs.remove(i), filter)))
+                            attrs.remove(i);
+                            Ok(Some(filter))
                         },
                         Err(err) => Err(Diagnostic::spanned(err.span(), Level::Error, err.to_string())),
                     };
@@ -68,22 +70,18 @@ pub fn remove_version_attr(attrs: &mut Vec<Attribute>) -> Result<Option<(Attribu
 ///
 /// # Returns
 /// A new [`TokenStream2`] that encodes the body item but without certain components if filtered out by the version.
-pub fn filter_item(item: &mut BodyItem, versions: &VersionList, version: &Version) -> Result<TokenStream2, Diagnostic> {
+pub fn filter_item(mut item: BodyItem, versions: &VersionList, version: &Version) -> Result<TokenStream2, Diagnostic> {
     // First, check the item's attributes to see if it has been version filtered
-    let filter: Option<(Attribute, VersionFilter)> = remove_version_attr(item.attrs_mut())?;
-    if let Some((attr, filter)) = &filter {
+    if let Some(filter) = remove_version_attr(item.attrs_mut())? {
         // Next, see if this matches the current version
-        if !filter.matches(version) {
-            // Don't forget to restore the attribute
-            item.attrs_mut().push(attr.clone());
-
-            // Now skip it
+        filter.verify(versions)?;
+        if !filter.matches(versions, version) {
             return Ok(quote! {});
         }
     }
 
     // Then serialize to quote
-    let res: TokenStream2 = match item {
+    match item {
         BodyItem::Module(attrs, vis, unsafety, name, items, mod_token, semi_token, _) => {
             // Recurse into the contents first
             let mut filtered: TokenStream2 = TokenStream2::new();
@@ -92,25 +90,151 @@ pub fn filter_item(item: &mut BodyItem, versions: &VersionList, version: &Versio
             }
 
             // Now make the module
-            quote! {
+            Ok(quote! {
                 #(#attrs)*
                 #vis #unsafety #mod_token #name {
                     #filtered
                 } #semi_token
-            }
+            })
         },
 
-        BodyItem::Enum(e) => quote! { #e },
-        BodyItem::Struct(s) => quote! { #s },
-    };
+        BodyItem::Enum(mut e) => {
+            // Filter variants next
+            let mut fvariants: Punctuated<Variant, Comma> = Punctuated::new();
+            for mut variant in e.variants {
+                // See if this variant has the attribute
+                if let Some(filter) = remove_version_attr(&mut variant.attrs)? {
+                    filter.verify(versions)?;
+                    if !filter.matches(versions, version) {
+                        // Don't add it!
+                        continue;
+                    }
+                }
 
-    // Now restore the attribute to the list
-    if let Some((attr, _)) = filter {
-        item.attrs_mut().push(attr);
+                // Otherwise, examine the variant's fields
+                variant.fields = match variant.fields {
+                    Fields::Named(mut fields) => {
+                        let mut ffields: Punctuated<Field, Comma> = Punctuated::new();
+                        for mut field in fields.named {
+                            // See if this field has the attribute
+                            if let Some(filter) = remove_version_attr(&mut field.attrs)? {
+                                filter.verify(versions)?;
+                                if !filter.matches(versions, version) {
+                                    // Don't add it!
+                                    continue;
+                                }
+                            }
+                            ffields.push(field);
+                        }
+                        fields.named = ffields;
+                        Fields::Named(fields)
+                    },
+                    Fields::Unnamed(mut fields) => {
+                        let mut ffields: Punctuated<Field, Comma> = Punctuated::new();
+                        for mut field in fields.unnamed {
+                            // See if this field has the attribute
+                            if let Some(filter) = remove_version_attr(&mut field.attrs)? {
+                                filter.verify(versions)?;
+                                if !filter.matches(versions, version) {
+                                    // Don't add it!
+                                    continue;
+                                }
+                            }
+                            ffields.push(field);
+                        }
+                        fields.unnamed = ffields;
+                        Fields::Unnamed(fields)
+                    },
+
+                    // Nothing to do here
+                    Fields::Unit => Fields::Unit,
+                };
+
+                // Add it
+                fvariants.push(variant);
+            }
+            e.variants = fvariants;
+
+            // Then serialize
+            Ok(quote! { #e })
+        },
+        BodyItem::Struct(mut s) => {
+            // Filter the struct's fields
+            s.fields = match s.fields {
+                Fields::Named(mut fields) => {
+                    let mut ffields: Punctuated<Field, Comma> = Punctuated::new();
+                    for mut field in fields.named {
+                        // See if this field has the attribute
+                        if let Some(filter) = remove_version_attr(&mut field.attrs)? {
+                            filter.verify(versions)?;
+                            if !filter.matches(versions, version) {
+                                // Don't add it!
+                                continue;
+                            }
+                        }
+                        ffields.push(field);
+                    }
+                    fields.named = ffields;
+                    Fields::Named(fields)
+                },
+                Fields::Unnamed(mut fields) => {
+                    let mut ffields: Punctuated<Field, Comma> = Punctuated::new();
+                    for mut field in fields.unnamed {
+                        // See if this field has the attribute
+                        if let Some(filter) = remove_version_attr(&mut field.attrs)? {
+                            filter.verify(versions)?;
+                            if !filter.matches(versions, version) {
+                                // Don't add it!
+                                continue;
+                            }
+                        }
+                        ffields.push(field);
+                    }
+                    fields.unnamed = ffields;
+                    Fields::Unnamed(fields)
+                },
+
+                // Nothing to do here
+                Fields::Unit => Fields::Unit,
+            };
+
+            // Then serialize
+            Ok(quote! { #s })
+        },
+
+        BodyItem::Impl(mut i) => {
+            // Go over the nested items
+            let mut fitems: Vec<ImplItem> = Vec::new();
+            for mut item in i.items {
+                // Check if we want to keep this based on the item's attributes
+                let keep: bool = match &mut item {
+                    ImplItem::Const(ImplItemConst { attrs, .. })
+                    | ImplItem::Fn(ImplItemFn { attrs, .. })
+                    | ImplItem::Macro(ImplItemMacro { attrs, .. })
+                    | ImplItem::Type(ImplItemType { attrs, .. }) => {
+                        if let Some(filter) = remove_version_attr(attrs)? {
+                            filter.verify(versions)?;
+                            filter.matches(versions, version)
+                        } else {
+                            true
+                        }
+                    },
+
+                    // Rest is always kept
+                    _ => true,
+                };
+
+                // Then keep it if so
+                if keep {
+                    fitems.push(item);
+                }
+            }
+            i.items = fitems;
+
+            // Jep, done here, serialize!
+            Ok(quote! { #i })
+        },
     }
-
-    // Done!
-    Ok(res)
 }
 
 
@@ -146,14 +270,17 @@ pub fn call(attrs: TokenStream2, input: TokenStream2) -> Result<TokenStream2, Di
     };
 
     // Set the toplevel item's visibility to public, so it's always accessible in our generated module
-    let old_vis: Visibility = body.vis().clone();
-    *body.vis_mut() = Visibility::Public(Pub { span: old_vis.span() });
+    let old_vis: Option<Visibility> = body.vis_mut().map(|vis| {
+        let old_vis: Visibility = vis.clone();
+        *vis = Visibility::Public(Pub { span: old_vis.span() });
+        old_vis
+    });
 
     // Now examine all of the body items to serialize them appropriately
     let mut impls: Vec<TokenStream2> = Vec::with_capacity(versions.0.len());
     for version in &versions.0 {
         // Collect the filtered editions of this item and all its contents
-        let filtered: TokenStream2 = filter_item(&mut body, &versions, version)?;
+        let filtered: TokenStream2 = filter_item(body.clone(), &versions, version)?;
 
         // Generate a module for this version
         let ident: Ident = Ident::new(&version.0.value(), version.0.span());

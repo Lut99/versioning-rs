@@ -4,7 +4,7 @@
 //  Created:
 //    21 Nov 2023, 22:07:03
 //  Last edited:
-//    20 Dec 2023, 15:27:05
+//    20 Dec 2023, 16:51:52
 //  Auto updated?
 //    Yes
 //
@@ -13,6 +13,8 @@
 //!   versions.
 //
 
+use proc_macro2::Span;
+use proc_macro_error::{Diagnostic, Level};
 use syn::parse::{Parse, ParseBuffer, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{parenthesized, Ident, LitStr, Token};
@@ -23,9 +25,13 @@ use syn::{parenthesized, Ident, LitStr, Token};
 pub trait Filter {
     /// Examines if this filter would allow the given version.
     ///
+    /// # Arguments
+    /// - `list`: A [`VersionList`] that, when ordered filters are used (e.g., [`VersionFilter::AtMost`]), determines the version order.
+    /// - `version`: The [`Version`] to match with this filter.
+    ///
     /// # Returns
     /// True if the version _does_ match the filter, or false if it _doesn't_.
-    fn matches(&self, version: &Version) -> bool;
+    fn matches(&self, list: &VersionList, version: &Version) -> bool;
 }
 
 
@@ -42,13 +48,6 @@ pub trait Filter {
 /// matches all versions starting with `1.0`.
 #[derive(Clone, Debug)]
 pub struct Version(pub LitStr);
-impl Filter for Version {
-    #[inline]
-    fn matches(&self, version: &Version) -> bool {
-        // Just see if the name compares
-        self.0.value() == version.0.value()
-    }
-}
 impl Parse for Version {
     fn parse(input: ParseStream) -> syn::Result<Self> { Ok(Self(input.parse()?)) }
 }
@@ -88,6 +87,16 @@ impl Parse for VersionList {
 pub enum VersionFilter {
     /// It's a version string.
     Version(Version),
+
+    /// It's a `>` (ordered by appearance in `#[versioning]`)
+    AtLeastExcl(Version),
+    /// It's a `>=` (ordered by appearance in `#[versioning]`)
+    AtLeast(Version),
+    /// It's a `<` (ordered by appearance in `#[versioning]`)
+    AtMostExcl(Version),
+    /// It's a `<=` (ordered by appearance in `#[versioning]`)
+    AtMost(Version),
+
     /// It's a negation of a filter (i.e., anything _but_...)
     Not(Box<Self>),
     /// It's a disjunction between nested filters
@@ -95,31 +104,162 @@ pub enum VersionFilter {
     /// It's a conjunction between nested filters
     All(Vec<Self>),
 }
+impl VersionFilter {
+    /// Verifies if all versions are known, then emits errors if they aren't.
+    ///
+    /// # Arguments
+    /// - `list`: A [`VersionList`] that determines known versions.
+    ///
+    /// # Errors
+    /// This function emits a [`Diagnostic`] if a [`Version`] in this filter did not exist.
+    pub fn verify(&self, list: &VersionList) -> Result<(), Diagnostic> {
+        // Match on the operation
+        let unknown_span: Option<(String, Span)> = match self {
+            Self::Version(ver) => {
+                if !list.0.iter().any(|v| v.0.value().starts_with(&ver.0.value())) {
+                    Some((ver.0.value(), ver.0.span()))
+                } else {
+                    None
+                }
+            },
+
+            Self::AtLeastExcl(ver) => {
+                if !list.0.iter().any(|v| v.0.value() == ver.0.value()) {
+                    Some((ver.0.value(), ver.0.span()))
+                } else {
+                    None
+                }
+            },
+            Self::AtLeast(ver) => {
+                if !list.0.iter().any(|v| v.0.value() == ver.0.value()) {
+                    Some((ver.0.value(), ver.0.span()))
+                } else {
+                    None
+                }
+            },
+            Self::AtMostExcl(ver) => {
+                if !list.0.iter().any(|v| v.0.value() == ver.0.value()) {
+                    Some((ver.0.value(), ver.0.span()))
+                } else {
+                    None
+                }
+            },
+            Self::AtMost(ver) => {
+                if !list.0.iter().any(|v| v.0.value() == ver.0.value()) {
+                    Some((ver.0.value(), ver.0.span()))
+                } else {
+                    None
+                }
+            },
+
+            Self::Not(filter) => {
+                filter.verify(list)?;
+                None
+            },
+            Self::Any(vers) => {
+                for filter in vers {
+                    filter.verify(list)?;
+                }
+                None
+            },
+            Self::All(vers) => {
+                for filter in vers {
+                    filter.verify(list)?;
+                }
+                None
+            },
+        };
+
+        // If we found any known ones, emit the diagnostic
+        match unknown_span {
+            Some((ver, span)) => Err(Diagnostic::spanned(
+                span,
+                Level::Error,
+                format!("Unknown version string '{ver}' (add it to your `#[versioning(...)]` list of known versions)"),
+            )),
+            None => Ok(()),
+        }
+    }
+}
 impl Filter for VersionFilter {
     #[inline]
-    fn matches(&self, version: &Version) -> bool {
+    fn matches(&self, list: &VersionList, version: &Version) -> bool {
         // Match on the operation
         match self {
-            Self::Version(ver) => ver.matches(version),
-            Self::Not(filter) => !filter.matches(version),
-            Self::Any(list) => {
+            Self::Version(ver) => version.0.value().starts_with(&ver.0.value()),
+
+            Self::AtLeastExcl(ver) => {
+                // Find the index of both versions
+                let ver_i: usize =
+                    list.0.iter().position(|v| ver.0.value() == v.0.value()).unwrap_or_else(|| panic!("Encountered unknown version '{ver:?}'"));
+                let version_i: usize = list
+                    .0
+                    .iter()
+                    .position(|v| version.0.value() == v.0.value())
+                    .unwrap_or_else(|| panic!("Encountered unknown version '{version:?}'"));
+
+                // Compare
+                version_i > ver_i
+            },
+            Self::AtLeast(ver) => {
+                // Find the index of both versions
+                let ver_i: usize =
+                    list.0.iter().position(|v| ver.0.value() == v.0.value()).unwrap_or_else(|| panic!("Encountered unknown version '{ver:?}'"));
+                let version_i: usize = list
+                    .0
+                    .iter()
+                    .position(|v| version.0.value() == v.0.value())
+                    .unwrap_or_else(|| panic!("Encountered unknown version '{version:?}'"));
+
+                // Compare
+                version_i >= ver_i
+            },
+            Self::AtMostExcl(ver) => {
+                // Find the index of both versions
+                let ver_i: usize =
+                    list.0.iter().position(|v| ver.0.value() == v.0.value()).unwrap_or_else(|| panic!("Encountered unknown version '{ver:?}'"));
+                let version_i: usize = list
+                    .0
+                    .iter()
+                    .position(|v| version.0.value() == v.0.value())
+                    .unwrap_or_else(|| panic!("Encountered unknown version '{version:?}'"));
+
+                // Compare
+                version_i < ver_i
+            },
+            Self::AtMost(ver) => {
+                // Find the index of both versions
+                let ver_i: usize =
+                    list.0.iter().position(|v| ver.0.value() == v.0.value()).unwrap_or_else(|| panic!("Encountered unknown version '{ver:?}'"));
+                let version_i: usize = list
+                    .0
+                    .iter()
+                    .position(|v| version.0.value() == v.0.value())
+                    .unwrap_or_else(|| panic!("Encountered unknown version '{version:?}'"));
+
+                // Compare
+                version_i <= ver_i
+            },
+
+            Self::Not(filter) => !filter.matches(list, version),
+            Self::Any(vers) => {
                 // Only one needs to match
                 let mut res: bool = false;
-                for filter in list {
-                    res = res || filter.matches(version);
+                for filter in vers {
+                    res = res || filter.matches(list, version);
                 }
                 res
             },
-            Self::All(list) => {
+            Self::All(vers) => {
                 // Catch empty lists
-                if list.is_empty() {
+                if vers.is_empty() {
                     return false;
                 }
 
                 // Otherwise, require all to match
                 let mut res: bool = true;
-                for filter in list {
-                    res = res && filter.matches(version);
+                for filter in vers {
+                    res = res && filter.matches(list, version);
                 }
                 res
             },
@@ -135,7 +275,31 @@ impl Parse for VersionFilter {
         } else if lookahead.peek(Ident) {
             // Check _which_ identifier
             let ident: Ident = input.parse()?;
-            if ident == "not" {
+            if ident == "min_excl" {
+                // Parse brackets, with a new version filter in between them
+                let contents;
+                parenthesized!(contents in input);
+                let version: Version = contents.parse()?;
+                Ok(Self::AtLeastExcl(version))
+            } else if ident == "min" {
+                // Parse brackets, with a new version filter in between them
+                let contents;
+                parenthesized!(contents in input);
+                let version: Version = contents.parse()?;
+                Ok(Self::AtLeast(version))
+            } else if ident == "max_excl" {
+                // Parse brackets, with a new version filter in between them
+                let contents;
+                parenthesized!(contents in input);
+                let version: Version = contents.parse()?;
+                Ok(Self::AtMostExcl(version))
+            } else if ident == "max" {
+                // Parse brackets, with a new version filter in between them
+                let contents;
+                parenthesized!(contents in input);
+                let version: Version = contents.parse()?;
+                Ok(Self::AtMost(version))
+            } else if ident == "not" {
                 // Parse brackets, with a new version filter in between them
                 let contents;
                 parenthesized!(contents in input);
