@@ -4,7 +4,7 @@
 //  Created:
 //    21 Nov 2023, 22:07:03
 //  Last edited:
-//    21 Nov 2023, 22:30:09
+//    20 Dec 2023, 15:27:05
 //  Auto updated?
 //    Yes
 //
@@ -18,6 +18,20 @@ use syn::punctuated::Punctuated;
 use syn::{parenthesized, Ident, LitStr, Token};
 
 
+/***** INTERFACE *****/
+/// Defines that something can filter out [`Version`]s.
+pub trait Filter {
+    /// Examines if this filter would allow the given version.
+    ///
+    /// # Returns
+    /// True if the version _does_ match the filter, or false if it _doesn't_.
+    fn matches(&self, version: &Version) -> bool;
+}
+
+
+
+
+
 /***** LIBRARY *****/
 /// A version string that matches (part of) a filter.
 ///
@@ -28,6 +42,13 @@ use syn::{parenthesized, Ident, LitStr, Token};
 /// matches all versions starting with `1.0`.
 #[derive(Clone, Debug)]
 pub struct Version(pub LitStr);
+impl Filter for Version {
+    #[inline]
+    fn matches(&self, version: &Version) -> bool {
+        // Just see if the name compares
+        self.0.value() == version.0.value()
+    }
+}
 impl Parse for Version {
     fn parse(input: ParseStream) -> syn::Result<Self> { Ok(Self(input.parse()?)) }
 }
@@ -73,6 +94,37 @@ pub enum VersionFilter {
     Any(Vec<Self>),
     /// It's a conjunction between nested filters
     All(Vec<Self>),
+}
+impl Filter for VersionFilter {
+    #[inline]
+    fn matches(&self, version: &Version) -> bool {
+        // Match on the operation
+        match self {
+            Self::Version(ver) => ver.matches(version),
+            Self::Not(filter) => !filter.matches(version),
+            Self::Any(list) => {
+                // Only one needs to match
+                let mut res: bool = false;
+                for filter in list {
+                    res = res || filter.matches(version);
+                }
+                res
+            },
+            Self::All(list) => {
+                // Catch empty lists
+                if list.is_empty() {
+                    return false;
+                }
+
+                // Otherwise, require all to match
+                let mut res: bool = true;
+                for filter in list {
+                    res = res && filter.matches(version);
+                }
+                res
+            },
+        }
+    }
 }
 impl Parse for VersionFilter {
     fn parse(input: ParseStream) -> syn::Result<Self> {

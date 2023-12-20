@@ -4,7 +4,7 @@
 //  Created:
 //    20 Nov 2023, 13:02:02
 //  Last edited:
-//    27 Nov 2023, 16:34:57
+//    20 Dec 2023, 15:39:30
 //  Auto updated?
 //    Yes
 //
@@ -15,6 +15,7 @@
 use proc_macro2::Span;
 use syn::parse::{Parse, ParseBuffer, ParseStream};
 use syn::spanned::Spanned as _;
+use syn::token::{Mod, Semi, Unsafe};
 use syn::{Attribute, Ident, Item, ItemEnum, ItemMod, ItemStruct, Visibility};
 
 
@@ -57,22 +58,34 @@ use syn::{Attribute, Ident, Item, ItemEnum, ItemMod, ItemStruct, Visibility};
 #[derive(Clone, Debug)]
 pub enum BodyItem {
     /// It's a module
-    Module(Vec<Attribute>, Visibility, Ident, Vec<Self>, ModSpan),
+    Module(Vec<Attribute>, Visibility, Option<Unsafe>, Ident, Vec<Self>, Mod, Option<Semi>, Span),
     /// It's an enum
     Enum(ItemEnum),
     /// It's a struct
     Struct(ItemStruct),
 }
 impl BodyItem {
+    // /// Returns the attributes of this item.
+    // ///
+    // /// # Returns
+    // /// A slice of [`Attribute`]s part of this body.
+    // pub fn attrs(&self) -> &[Attribute] {
+    //     match self {
+    //         Self::Module(attrs, _, _, _, _, _, _, _) => attrs,
+    //         Self::Enum(e) => &e.attrs,
+    //         Self::Struct(s) => &s.attrs,
+    //     }
+    // }
+
     /// Returns the attributes of this item.
     ///
     /// # Returns
-    /// A slice of [`Attribute`]s part of this body.
-    pub fn attrs(&self) -> &[Attribute] {
+    /// A mutable vector of [`Attribute`]s part of this body.
+    pub fn attrs_mut(&mut self) -> &mut Vec<Attribute> {
         match self {
-            Self::Module(attrs, _, _, _, _) => attrs,
-            Self::Enum(e) => &e.attrs,
-            Self::Struct(s) => &s.attrs,
+            Self::Module(attrs, _, _, _, _, _, _, _) => attrs,
+            Self::Enum(e) => &mut e.attrs,
+            Self::Struct(s) => &mut s.attrs,
         }
     }
 
@@ -82,39 +95,39 @@ impl BodyItem {
     /// A [`Visibility`] determining how public this item is.
     pub fn vis(&self) -> &Visibility {
         match self {
-            Self::Module(_, vis, _, _, _) => vis,
+            Self::Module(_, vis, _, _, _, _, _, _) => vis,
             Self::Enum(e) => &e.vis,
             Self::Struct(s) => &s.vis,
         }
     }
 
-    /// Returns the span of this item.
+    /// Returns the visibility of this item.
     ///
     /// # Returns
-    /// A [`Span`] with the source location.
-    pub fn span(&self) -> Span {
+    /// A mutable [`Visibility`] determining how public this item is.
+    pub fn vis_mut(&mut self) -> &mut Visibility {
         match self {
-            Self::Module(_, _, _, _, span) => *span,
-            Self::Enum(e) => e.span(),
-            Self::Struct(s) => s.span(),
+            Self::Module(_, vis, _, _, _, _, _, _) => vis,
+            Self::Enum(e) => &mut e.vis,
+            Self::Struct(s) => &mut s.vis,
         }
     }
+
+    // /// Returns the span of this item.
+    // ///
+    // /// # Returns
+    // /// A [`Span`] with the source location.
+    // pub fn span(&self) -> Span {
+    //     match self {
+    //         Self::Module(_, _, _, _, _, _, _, span) => *span,
+    //         Self::Enum(e) => e.span(),
+    //         Self::Struct(s) => s.span(),
+    //     }
+    // }
 }
 impl Parse for BodyItem {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        input.call(|buf: &ParseBuffer| -> syn::Result<Self> {
-            // Lookahead for the token
-            if let Ok(m) = buf.parse::<ItemMod>() {
-                m.try_into()
-            } else if let Ok(e) = buf.parse::<ItemEnum>() {
-                e.try_into()
-            } else if let Ok(s) = buf.parse::<ItemStruct>() {
-                s.try_into()
-            } else {
-                Err(buf.error("Expected module, struct or enum"))
-            }
-        })
-    }
+    #[inline]
+    fn parse(input: ParseStream) -> syn::Result<Self> { input.call(|buf: &ParseBuffer| -> syn::Result<Self> { buf.parse::<Item>()?.try_into() }) }
 }
 impl TryFrom<Item> for BodyItem {
     type Error = syn::Error;
