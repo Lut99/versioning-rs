@@ -4,7 +4,7 @@
 //  Created:
 //    19 Nov 2023, 19:25:25
 //  Last edited:
-//    20 Dec 2023, 16:33:35
+//    20 Dec 2023, 19:20:20
 //  Auto updated?
 //    Yes
 //
@@ -18,13 +18,95 @@ use quote::quote;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::token::{Comma, Pub};
-use syn::{Attribute, Field, Fields, Ident, ImplItem, ImplItemConst, ImplItemFn, ImplItemMacro, ImplItemType, Meta, Variant, Visibility};
+use syn::{
+    Attribute, Expr, ExprLit, Field, Fields, Ident, ImplItem, ImplItemConst, ImplItemFn, ImplItemMacro, ImplItemType, Lit, LitBool, Meta, Variant,
+    Visibility,
+};
 
 use crate::spec::BodyItem;
 use crate::version::{Filter as _, Version, VersionFilter, VersionList};
 
 
+/***** HELPERS *****/
+/// Defines the configurable options to the `#[versioning(...)]`-macro.
+#[derive(Debug)]
+struct Options {
+    /// Whether to inject `#[cfg(feature = "...")]` when generating code or not.
+    features: bool,
+}
+impl Default for Options {
+    #[inline]
+    fn default() -> Self { Self { features: false } }
+}
+
+
+
+
+
 /***** HELPER FUNCTIONS *****/
+/// Parses macro input as a [`VersionList`] and any options given as a key/value pair.
+///
+/// # Arguments
+/// - `tokens`: The [`TokenStream2`] that contains the input to the attribute macro.
+///
+/// # Returns
+/// A tuple with a [`VersionList`], containing the given versions, and an [`Options`], containing other configuration.
+///
+/// # Errors
+/// This function can error if the input is not valid.
+fn parse_input(tokens: TokenStream2) -> Result<(VersionList, Options), Diagnostic> {
+    // Parse the tokens as attributes first
+    let metas: Punctuated<Meta, Comma> = match syn::parse::Parser::parse2(Punctuated::parse_terminated, tokens) {
+        Ok(metas) => metas,
+        Err(err) => return Err(Diagnostic::spanned(err.span(), Level::Error, err.to_string())),
+    };
+
+    // Parse them
+    let mut versions: VersionList = VersionList(vec![]);
+    let mut opts: Options = Options::default();
+    for meta in metas {
+        // Match the meta
+        match meta {
+            // We assume paths are version identifiers
+            Meta::Path(p) => match p.get_ident() {
+                Some(ident) => versions.0.push(Version(ident.clone())),
+                None => return Err(Diagnostic::spanned(p.span(), Level::Error, format!("Given version number is not a valid identifier"))),
+            },
+
+            // Key/Value pairs are settings
+            Meta::NameValue(nv) => {
+                if nv.path.is_ident("features") {
+                    // Parse the value as a boolean literal
+                    let val: bool = if let Expr::Lit(ExprLit { lit: Lit::Bool(LitBool { value, .. }), .. }) = nv.value {
+                        value
+                    } else {
+                        return Err(Diagnostic::spanned(
+                            nv.value.span(),
+                            Level::Error,
+                            "'features' option must be given a boolean (true/false)".into(),
+                        ));
+                    };
+
+                    // Store it
+                    opts.features = val;
+                } else {
+                    return Err(Diagnostic::spanned(
+                        nv.path.span(),
+                        Level::Error,
+                        format!("Unknown configuration parameter '{}'", nv.path.span().source_text().unwrap_or_else(|| "???".into())),
+                    ));
+                }
+            },
+
+            // Others we ignore
+            Meta::List(l) => return Err(Diagnostic::spanned(l.span(), Level::Error, "Not a valid options to the `#[versioning(...)]`-macro".into())),
+        }
+    }
+
+    // Alright return the lot
+    Ok((versions, opts))
+}
+
 /// Attempts to read the `#[version(...)]`-attribute from the given list of attributes.
 ///
 /// Then removes it from the given list if found.
@@ -255,10 +337,7 @@ pub fn filter_item(mut item: BodyItem, versions: &VersionList, version: &Version
 /// This function may error if it failed to correctly understand the input.
 pub fn call(attrs: TokenStream2, input: TokenStream2) -> Result<TokenStream2, Diagnostic> {
     // Parse the attributes first as a list of versions
-    let versions: VersionList = match syn::parse2(attrs) {
-        Ok(versions) => versions,
-        Err(err) => return Err(Diagnostic::spanned(err.span(), Level::Error, err.to_string())),
-    };
+    let (versions, opts): (VersionList, Options) = parse_input(attrs)?;
 
     // Next, parse the input as a module
     let input_span: Span = input.span();
@@ -282,9 +361,20 @@ pub fn call(attrs: TokenStream2, input: TokenStream2) -> Result<TokenStream2, Di
         // Collect the filtered editions of this item and all its contents
         let filtered: TokenStream2 = filter_item(body.clone(), &versions, version)?;
 
+        // Check if we need to inject summat or not
+        let cfg: Option<TokenStream2> = if opts.features {
+            let feature: String = version.0.to_string();
+            Some(quote! {
+                #[cfg(feature = #feature)]
+            })
+        } else {
+            None
+        };
+
         // Generate a module for this version
-        let ident: Ident = Ident::new(&version.0.value(), version.0.span());
+        let ident: &Ident = &version.0;
         impls.push(quote! {
+            #cfg
             #old_vis mod #ident {
                 #filtered
             }

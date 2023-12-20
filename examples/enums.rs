@@ -4,7 +4,7 @@
 //  Created:
 //    20 Dec 2023, 15:46:07
 //  Last edited:
-//    20 Dec 2023, 15:59:15
+//    20 Dec 2023, 19:14:48
 //  Auto updated?
 //    Yes
 //
@@ -19,7 +19,7 @@ use versioning::versioning;
 
 /***** LIBRARY *****/
 /// We create four variants of this enum
-#[versioning("v1_0_0", "v2_0_0", "v3_0_0", "v4_0_0", "v5_0_0")]
+#[versioning(v1_0_0, v2_0_0, v3_0_0, v4_0_0, v5_0_0)]
 enum Example {
     #[version("v1_0_0")]
     Variant1,

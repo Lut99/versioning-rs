@@ -4,7 +4,7 @@
 //  Created:
 //    20 Dec 2023, 16:10:34
 //  Last edited:
-//    20 Dec 2023, 16:14:07
+//    20 Dec 2023, 19:18:36
 //  Auto updated?
 //    Yes
 //
@@ -16,7 +16,7 @@ use versioning::versioning;
 
 
 /***** LIBRARY *****/
-#[versioning("v1_0_0", "v2_0_0")]
+#[versioning(v1_0_0, v2_0_0)]
 mod defs {
     pub struct Example1 {
         #[version("v1_0_0")]

@@ -4,7 +4,7 @@
 //  Created:
 //    20 Dec 2023, 16:45:55
 //  Last edited:
-//    20 Dec 2023, 16:52:19
+//    20 Dec 2023, 19:14:38
 //  Auto updated?
 //    Yes
 //
@@ -17,7 +17,7 @@ use versioning::versioning;
 
 /***** LIBRARY *****/
 /// The order of versions is determined by this order
-#[versioning("v1_0_0", "v1_0_1", "v1_1_0", "v2_0_0")]
+#[versioning(v1_0_0, v1_0_1, v1_1_0, v2_0_0)]
 mod defs {
     pub struct Example {
         /// Note that the string is actually matched as a prefix to the version

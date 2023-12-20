@@ -4,7 +4,7 @@
 //  Created:
 //    20 Dec 2023, 16:23:38
 //  Last edited:
-//    20 Dec 2023, 16:43:17
+//    20 Dec 2023, 19:18:24
 //  Auto updated?
 //    Yes
 //
@@ -17,7 +17,7 @@ use versioning::versioning;
 
 /***** LIBRARY *****/
 /// The order of versions is determined by this order
-#[versioning("v1_0_0", "v1_0_1", "v1_1_0", "v2_0_0")]
+#[versioning(v1_0_0, v1_0_1, v1_1_0, v2_0_0)]
 mod defs {
     pub struct Example {
         /// This field is for the lower half...
@@ -28,9 +28,9 @@ mod defs {
         pub bar: u64,
 
         /// The same but showing exclusive bounds
-        #[version(max_excl("v1_1_0"))]
+        #[version(mxe("v1_1_0"))]
         pub baz: String,
-        #[version(min_excl("v1_0_1"))]
+        #[version(mne("v1_0_1"))]
         pub quz: u64,
     }
 }

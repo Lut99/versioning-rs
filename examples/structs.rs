@@ -4,7 +4,7 @@
 //  Created:
 //    20 Dec 2023, 15:54:25
 //  Last edited:
-//    20 Dec 2023, 15:59:19
+//    20 Dec 2023, 19:18:49
 //  Auto updated?
 //    Yes
 //
@@ -20,7 +20,7 @@ mod defs1 {
     use versioning::versioning;
 
     /// Shows named structs
-    #[versioning("v1_0_0", "v2_0_0")]
+    #[versioning(v1_0_0, v2_0_0)]
     struct Example1 {
         #[version("v1_0_0")]
         foo: String,
@@ -33,7 +33,7 @@ mod defs2 {
     use versioning::versioning;
 
     /// Shows unnamed structs
-    #[versioning("v1_0_0", "v2_0_0")]
+    #[versioning(v1_0_0, v2_0_0)]
     struct Example2(#[version("v1_0_0")] String, #[version("v2_0_0")] u64);
 }
 
