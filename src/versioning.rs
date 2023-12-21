@@ -4,7 +4,7 @@
 //  Created:
 //    19 Nov 2023, 19:25:25
 //  Last edited:
-//    21 Dec 2023, 10:55:00
+//    21 Dec 2023, 10:57:06
 //  Auto updated?
 //    Yes
 //
@@ -520,14 +520,14 @@ fn filter_item(mut item: Item, versions: &VersionList, version: &Version) -> Res
 
         // The rest of the defined ones we just pass as-is...
         item if matches!(item, Item::Const(_))
-            && matches!(item, Item::ExternCrate(_))
-            && matches!(item, Item::Fn(_))
-            && matches!(item, Item::Macro(_))
-            && matches!(item, Item::Static(_))
-            && matches!(item, Item::TraitAlias(_))
-            && matches!(item, Item::Type(_))
-            && matches!(item, Item::Use(_))
-            && matches!(item, Item::Verbatim(_)) =>
+            || matches!(item, Item::ExternCrate(_))
+            || matches!(item, Item::Fn(_))
+            || matches!(item, Item::Macro(_))
+            || matches!(item, Item::Static(_))
+            || matches!(item, Item::TraitAlias(_))
+            || matches!(item, Item::Type(_))
+            || matches!(item, Item::Use(_))
+            || matches!(item, Item::Verbatim(_)) =>
         {
             Ok(Some(item))
         },
