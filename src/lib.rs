@@ -4,7 +4,7 @@
 //  Created:
 //    18 Nov 2023, 12:57:56
 //  Last edited:
-//    21 Nov 2023, 22:12:29
+//    21 Dec 2023, 10:07:20
 //  Auto updated?
 //    Yes
 //
@@ -13,7 +13,7 @@
 //!   schema- or specification-like struct to multiple versions of itself.
 //
 
-mod spec;
+// mod spec;
 mod version;
 mod versioning;
 

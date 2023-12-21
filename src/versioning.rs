@@ -4,7 +4,7 @@
 //  Created:
 //    19 Nov 2023, 19:25:25
 //  Last edited:
-//    21 Dec 2023, 10:03:59
+//    21 Dec 2023, 10:47:08
 //  Auto updated?
 //    Yes
 //
@@ -17,13 +17,15 @@ use proc_macro_error::{Diagnostic, Level};
 use quote::quote;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
-use syn::token::{Comma, Pub};
+use syn::token::{Brace, Comma, Mod, Pub};
 use syn::{
-    Attribute, Expr, ExprLit, Field, Fields, Ident, ImplItem, ImplItemConst, ImplItemFn, ImplItemMacro, ImplItemType, Lit, LitBool, Meta, Variant,
-    Visibility,
+    Attribute, Expr, ExprLit, Field, Fields, ForeignItem, ForeignItemFn, ForeignItemMacro, ForeignItemStatic, ForeignItemType, ImplItem,
+    ImplItemConst, ImplItemFn, ImplItemMacro, ImplItemType, Item, ItemConst, ItemEnum, ItemExternCrate, ItemFn, ItemForeignMod, ItemImpl, ItemMacro,
+    ItemMod, ItemStatic, ItemStruct, ItemTrait, ItemTraitAlias, Lit, LitBool, Meta, TraitItem, TraitItemConst, TraitItemFn, TraitItemMacro,
+    TraitItemType, Variant, Visibility,
 };
 
-use crate::spec::BodyItem;
+// use crate::spec::BodyItem;
 use crate::version::{Filter as _, Version, VersionFilter, VersionList};
 
 
@@ -33,12 +35,12 @@ use crate::version::{Filter as _, Version, VersionFilter, VersionList};
 struct Options {
     /// Whether to inject `#[cfg(feature = "...")]` when generating code or not.
     features: bool,
-    /// Whether modules starting with an underscore (`_`) are omitted from the generated code or not.
-    invisible_modules: bool,
+    /// Whether toplevel modules are wrapped or renamed.
+    nest_toplevel_modules: bool,
 }
 impl Default for Options {
     #[inline]
-    fn default() -> Self { Self { features: false, invisible_modules: true } }
+    fn default() -> Self { Self { features: false, nest_toplevel_modules: false } }
 }
 
 
@@ -46,6 +48,111 @@ impl Default for Options {
 
 
 /***** HELPER FUNCTIONS *****/
+/// Gets the attributes of an [`Item`], mutably.
+///
+/// # Arguments
+/// - `item`: A(n) (mutable reference to the) [`Item`] of which to return the attributes.
+///
+/// # Returns
+/// A mutable list of [`Attribute`]s.
+#[inline]
+fn item_attrs_mut(item: &mut Item) -> &mut Vec<Attribute> {
+    match item {
+        // All the ones we know
+        Item::Const(ItemConst { attrs, .. })
+        | Item::Enum(ItemEnum { attrs, .. })
+        | Item::ExternCrate(ItemExternCrate { attrs, .. })
+        | Item::Fn(ItemFn { attrs, .. })
+        | Item::ForeignMod(ItemForeignMod { attrs, .. })
+        | Item::Impl(ItemImpl { attrs, .. })
+        | Item::Macro(ItemMacro { attrs, .. })
+        | Item::Mod(ItemMod { attrs, .. })
+        | Item::Static(ItemStatic { attrs, .. })
+        | Item::Struct(ItemStruct { attrs, .. })
+        | Item::Trait(ItemTrait { attrs, .. })
+        | Item::TraitAlias(ItemTraitAlias { attrs, .. }) => attrs,
+
+        // And any others, 'cuz non-exhaustive ;(
+        _ => unimplemented!(),
+    }
+}
+/// Gets the visibility of an [`Item`], mutably.
+///
+/// # Arguments
+/// - `item`: A(n) (mutable reference to the) [`Item`] of which to return the attributes.
+///
+/// # Returns
+/// A mutable reference to the [`Visibility`], or [`None`] if this variant does not have any.
+#[inline]
+fn item_vis_mut(item: &mut Item) -> Option<&mut Visibility> {
+    match item {
+        // All the ones we know and have visibility
+        Item::Const(ItemConst { vis, .. })
+        | Item::Enum(ItemEnum { vis, .. })
+        | Item::ExternCrate(ItemExternCrate { vis, .. })
+        | Item::Fn(ItemFn { vis, .. })
+        | Item::Mod(ItemMod { vis, .. })
+        | Item::Static(ItemStatic { vis, .. })
+        | Item::Struct(ItemStruct { vis, .. })
+        | Item::Trait(ItemTrait { vis, .. })
+        | Item::TraitAlias(ItemTraitAlias { vis, .. }) => Some(vis),
+
+        // All the ones we know that _don't_ have visibility
+        Item::ForeignMod(ItemForeignMod { .. }) | Item::Impl(ItemImpl { .. }) | Item::Macro(ItemMacro { .. }) => None,
+
+        // And any others, 'cuz non-exhaustive ;(
+        _ => unimplemented!(),
+    }
+}
+
+/// Gets the attributes of a [`TraitItem`], mutably.
+///
+/// # Arguments
+/// - `item`: A (mutable reference to the) [`TraitItem`] of which to return the attributes.
+///
+/// # Returns
+/// A mutable list of [`Attribute`]s, or [`None`] if this variant does not have any.
+#[inline]
+fn trait_item_attrs_mut(item: &mut TraitItem) -> Option<&mut Vec<Attribute>> {
+    match item {
+        // All the ones we know
+        TraitItem::Const(TraitItemConst { attrs, .. })
+        | TraitItem::Fn(TraitItemFn { attrs, .. })
+        | TraitItem::Macro(TraitItemMacro { attrs, .. })
+        | TraitItem::Type(TraitItemType { attrs, .. }) => Some(attrs),
+
+        // Except for the vertabim; that one doesn't have any attrs
+        TraitItem::Verbatim(_) => None,
+
+        // And any others, 'cuz non-exhaustive ;(
+        _ => unimplemented!(),
+    }
+}
+
+/// Gets the attributes of a [`ForeignItem`], mutably.
+///
+/// # Arguments
+/// - `item`: A (mutable reference to the) [`ForeignItem`] of which to return the attributes.
+///
+/// # Returns
+/// A mutable list of [`Attribute`]s, or [`None`] if this variant does not have any.
+#[inline]
+fn foreign_item_attrs_mut(item: &mut ForeignItem) -> Option<&mut Vec<Attribute>> {
+    match item {
+        // All the ones we know
+        ForeignItem::Fn(ForeignItemFn { attrs, .. })
+        | ForeignItem::Macro(ForeignItemMacro { attrs, .. })
+        | ForeignItem::Static(ForeignItemStatic { attrs, .. })
+        | ForeignItem::Type(ForeignItemType { attrs, .. }) => Some(attrs),
+
+        // Except for the vertabim; that one doesn't have any attrs
+        ForeignItem::Verbatim(_) => None,
+
+        // And any others, 'cuz non-exhaustive ;(
+        _ => unimplemented!(),
+    }
+}
+
 /// Parses macro input as a [`VersionList`] and any options given as a key/value pair.
 ///
 /// # Arguments
@@ -91,7 +198,7 @@ fn parse_input(tokens: TokenStream2) -> Result<(VersionList, Options), Diagnosti
 
                     // Store it
                     opts.features = val;
-                } else if nv.path.is_ident("invisible_modules") {
+                } else if nv.path.is_ident("nest_toplevel_modules") {
                     // Parse the value as a boolean literal
                     let val: bool = if let Expr::Lit(ExprLit { lit: Lit::Bool(LitBool { value, .. }), .. }) = nv.value {
                         value
@@ -99,12 +206,12 @@ fn parse_input(tokens: TokenStream2) -> Result<(VersionList, Options), Diagnosti
                         return Err(Diagnostic::spanned(
                             nv.value.span(),
                             Level::Error,
-                            "'invisible_modules' option must be given a boolean (true/false)".into(),
+                            "'nest_toplevel_modules' option must be given a boolean (true/false)".into(),
                         ));
                     };
 
                     // Store it
-                    opts.invisible_modules = val;
+                    opts.nest_toplevel_modules = val;
                 } else {
                     return Err(Diagnostic::spanned(
                         nv.path.span(),
@@ -165,47 +272,40 @@ fn remove_version_attr(attrs: &mut Vec<Attribute>) -> Result<Option<VersionFilte
 /// - `item`: The [`BodyItem`] to filter.
 /// - `versions`: The list of versions in total (allows us to define order)
 /// - `version`: The current version to filter for.
-/// - `opts`: Any options active.
-/// - `is_toplevel`: If true, assumes we're working on the toplevel. This means that:
-///    - Modules starting with `_` are not generated, but only their contents (i.e., invisible top modules).
 ///
 /// # Returns
 /// A new [`TokenStream2`] that encodes the body item but without certain components if filtered out by the version.
-fn filter_item(mut item: BodyItem, versions: &VersionList, version: &Version, opts: &Options, is_toplevel: bool) -> Result<TokenStream2, Diagnostic> {
+fn filter_item(mut item: Item, versions: &VersionList, version: &Version) -> Result<Option<Item>, Diagnostic> {
     // First, check the item's attributes to see if it has been version filtered
-    if let Some(filter) = remove_version_attr(item.attrs_mut())? {
+    if let Some(filter) = remove_version_attr(item_attrs_mut(&mut item))? {
         // Next, see if this matches the current version
         filter.verify(versions)?;
         if !filter.matches(versions, version) {
-            return Ok(quote! {});
+            // Filtered oot!
+            return Ok(None);
         }
     }
 
-    // Then serialize to quote
+    // Then recurse if necessary
     match item {
-        BodyItem::Module(attrs, vis, unsafety, name, items, mod_token, semi_token, _) => {
-            // Recurse into the contents first
-            let mut filtered: TokenStream2 = TokenStream2::new();
-            for item in items {
-                filtered.extend(filter_item(item, versions, version, opts, false)?);
+        Item::Mod(mut m) => {
+            // Recursively only keep OK modules
+            if let Some((brace, items)) = m.content {
+                let mut fitems: Vec<Item> = Vec::with_capacity(items.len());
+                for item in items {
+                    // Only keep OK ones
+                    if let Some(item) = filter_item(item, versions, version)? {
+                        fitems.push(item);
+                    }
+                }
+                m.content = Some((brace, fitems));
             }
 
-            // Now make the module - but only if given!
-            if opts.invisible_modules && is_toplevel && name.to_string().starts_with('_') {
-                Ok(quote! {
-                    #filtered
-                })
-            } else {
-                Ok(quote! {
-                    #(#attrs)*
-                    #vis #unsafety #mod_token #name {
-                        #filtered
-                    } #semi_token
-                })
-            }
+            // OK, let's return!
+            Ok(Some(Item::Mod(m)))
         },
 
-        BodyItem::Enum(mut e) => {
+        Item::Enum(mut e) => {
             // Filter variants next
             let mut fvariants: Punctuated<Variant, Comma> = Punctuated::new();
             for mut variant in e.variants {
@@ -263,9 +363,9 @@ fn filter_item(mut item: BodyItem, versions: &VersionList, version: &Version, op
             e.variants = fvariants;
 
             // Then serialize
-            Ok(quote! { #e })
+            Ok(Some(Item::Enum(e)))
         },
-        BodyItem::Struct(mut s) => {
+        Item::Struct(mut s) => {
             // Filter the struct's fields
             s.fields = match s.fields {
                 Fields::Named(mut fields) => {
@@ -306,10 +406,56 @@ fn filter_item(mut item: BodyItem, versions: &VersionList, version: &Version, op
             };
 
             // Then serialize
-            Ok(quote! { #s })
+            Ok(Some(Item::Struct(s)))
+        },
+        Item::Trait(mut t) => {
+            // Filter the trait's items
+            let mut fitems: Vec<TraitItem> = Vec::with_capacity(t.items.len());
+            for mut item in t.items {
+                // If the items have any attributes, see if it must be filtered
+                if let Some(attrs) = trait_item_attrs_mut(&mut item) {
+                    if let Some(filter) = remove_version_attr(attrs)? {
+                        filter.verify(versions)?;
+                        if !filter.matches(versions, version) {
+                            // Don't add it!
+                            continue;
+                        }
+                    }
+                }
+
+                // Otherwise, if we got here, keep it
+                fitems.push(item);
+            }
+            t.items = fitems;
+
+            // OK, continue
+            Ok(Some(Item::Trait(t)))
         },
 
-        BodyItem::Impl(mut i) => {
+        Item::ForeignMod(mut f) => {
+            // Filter the nested items
+            let mut fitems: Vec<ForeignItem> = Vec::with_capacity(f.items.len());
+            for mut item in f.items {
+                // If the items have any attributes, see if it must be filtered
+                if let Some(attrs) = foreign_item_attrs_mut(&mut item) {
+                    if let Some(filter) = remove_version_attr(attrs)? {
+                        filter.verify(versions)?;
+                        if !filter.matches(versions, version) {
+                            // Don't add it!
+                            continue;
+                        }
+                    }
+                }
+
+                // Otherwise, if we got here, keep it
+                fitems.push(item);
+            }
+            f.items = fitems;
+
+            // OK, continue
+            Ok(Some(Item::ForeignMod(f)))
+        },
+        Item::Impl(mut i) => {
             // Go over the nested items
             let mut fitems: Vec<ImplItem> = Vec::new();
             for mut item in i.items {
@@ -328,7 +474,7 @@ fn filter_item(mut item: BodyItem, versions: &VersionList, version: &Version, op
                     },
 
                     // Rest is always kept
-                    _ => true,
+                    _ => unimplemented!(),
                 };
 
                 // Then keep it if so
@@ -339,8 +485,22 @@ fn filter_item(mut item: BodyItem, versions: &VersionList, version: &Version, op
             i.items = fitems;
 
             // Jep, done here, serialize!
-            Ok(quote! { #i })
+            Ok(Some(Item::Impl(i)))
         },
+
+        // The rest of the defined ones we just pass as-is...
+        item if matches!(item, Item::Const(_))
+            && matches!(item, Item::ExternCrate(_))
+            && matches!(item, Item::Fn(_))
+            && matches!(item, Item::Macro(_))
+            && matches!(item, Item::Static(_))
+            && matches!(item, Item::TraitAlias(_)) =>
+        {
+            Ok(Some(item))
+        },
+
+        // ...and undefined ones are errors, if ever
+        _ => unimplemented!(),
     }
 }
 
@@ -366,25 +526,53 @@ pub fn call(attrs: TokenStream2, input: TokenStream2) -> Result<TokenStream2, Di
 
     // Next, parse the input as a module
     let input_span: Span = input.span();
-    let mut body: BodyItem = match syn::parse2(input) {
-        Ok(body) => body,
+    let item: Item = match syn::parse2(input) {
+        Ok(item) => item,
         Err(err) => {
             return Err(Diagnostic::spanned(input_span, Level::Error, err.to_string()));
         },
     };
 
-    // Set the toplevel item's visibility to public, so it's always accessible in our generated module
-    let old_vis: Option<Visibility> = body.vis_mut().map(|vis| {
-        let old_vis: Visibility = vis.clone();
-        *vis = Visibility::Public(Pub { span: old_vis.span() });
-        old_vis
-    });
-
-    // Now examine all of the body items to serialize them appropriately
+    // Generate new impls from the parsed one for every version in the `versions`
     let mut impls: Vec<TokenStream2> = Vec::with_capacity(versions.0.len());
     for version in &versions.0 {
-        // Collect the filtered editions of this item and all its contents
-        let filtered: TokenStream2 = filter_item(body.clone(), &versions, version, &opts, true)?;
+        // Collect the filtered version of the implementation
+        let mut item: Item = match filter_item(item.clone(), &versions, version)? {
+            Some(item) => item,
+            // Filtered out
+            None => continue,
+        };
+
+        // Update the toplevel item to be wrapped in a version thing
+        let item: Item = if matches!(item, Item::Mod(_)) && !opts.nest_toplevel_modules {
+            // Special case where the toplevel module is transformed instead of wrapped; so update the name and return
+            if let Item::Mod(mut m) = item {
+                m.ident = version.0.clone();
+                Item::Mod(m)
+            } else {
+                unreachable!();
+            }
+        } else {
+            // "Steal" the visibility of the wrapped item
+            let module_vis: Visibility = if let Some(vis) = item_vis_mut(&mut item) {
+                let old_vis: Visibility = vis.clone();
+                *vis = Visibility::Public(Pub { span: old_vis.span() });
+                old_vis
+            } else {
+                Visibility::Inherited
+            };
+
+            // Wrap it in a new module
+            Item::Mod(ItemMod {
+                attrs: vec![],
+                vis: module_vis,
+                unsafety: None,
+                mod_token: Mod { span: Span::call_site() },
+                ident: version.0.clone(),
+                content: Some((Brace::default(), vec![item])),
+                semi: None,
+            })
+        };
 
         // Check if we need to inject the feature gate or not
         let cfg: Option<TokenStream2> = if opts.features {
@@ -397,12 +585,9 @@ pub fn call(attrs: TokenStream2, input: TokenStream2) -> Result<TokenStream2, Di
         };
 
         // Generate a module for this version
-        let ident: &Ident = &version.0;
         impls.push(quote! {
             #cfg
-            #old_vis mod #ident {
-                #filtered
-            }
+            #item
         });
     }
 

@@ -4,7 +4,7 @@
 //  Created:
 //    18 Nov 2023, 13:06:17
 //  Last edited:
-//    21 Dec 2023, 09:50:38
+//    21 Dec 2023, 10:47:42
 //  Auto updated?
 //    Yes
 //
@@ -19,7 +19,7 @@
 pub mod take1 {
     use versioning::versioning;
 
-    #[versioning(v1_0_0, v2_0_0)]
+    #[versioning(v1_0_0, v2_0_0, nest_toplevel_modules = true)]
     pub(crate) mod defs {
         #[version("v1_0_0")]
         pub struct FileDefinition {}

@@ -4,7 +4,7 @@
 //  Created:
 //    20 Dec 2023, 16:10:34
 //  Last edited:
-//    20 Dec 2023, 19:18:36
+//    21 Dec 2023, 10:47:16
 //  Auto updated?
 //    Yes
 //
@@ -51,14 +51,14 @@ mod defs {
 fn main() {
     // We have to commit to a version at the [`versioning`]-tag level
     {
-        use v1_0_0::defs::Example1;
+        use v1_0_0::Example1;
 
         // This is version 1 space!
         let example: Example1 = Example1::new();
         println!("{}", example.foo());
     }
     {
-        use v2_0_0::defs::Example1;
+        use v2_0_0::Example1;
 
         // This is version 2 space!
         let example: Example1 = Example1::new();

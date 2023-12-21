@@ -4,7 +4,7 @@
 //  Created:
 //    20 Dec 2023, 16:45:55
 //  Last edited:
-//    20 Dec 2023, 19:14:38
+//    21 Dec 2023, 10:47:29
 //  Auto updated?
 //    Yes
 //
@@ -37,8 +37,8 @@ mod defs {
 /***** ENTRYPOINT *****/
 fn main() {
     // This is how it works now
-    let _a = v1_0_0::defs::Example { foo: "Hello, world!".into(), bar: 42 };
-    let _b = v1_0_1::defs::Example { foo: "Hello, world!".into(), bar: 42 };
-    let _c = v1_1_0::defs::Example { foo: "Hello, world!".into(), bar: 42 };
-    let _d = v2_0_0::defs::Example { bar: 42 };
+    let _a = v1_0_0::Example { foo: "Hello, world!".into(), bar: 42 };
+    let _b = v1_0_1::Example { foo: "Hello, world!".into(), bar: 42 };
+    let _c = v1_1_0::Example { foo: "Hello, world!".into(), bar: 42 };
+    let _d = v2_0_0::Example { bar: 42 };
 }
