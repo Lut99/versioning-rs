@@ -4,7 +4,7 @@
 //  Created:
 //    19 Nov 2023, 19:25:25
 //  Last edited:
-//    20 Dec 2023, 19:20:20
+//    21 Dec 2023, 09:56:15
 //  Auto updated?
 //    Yes
 //
@@ -33,10 +33,12 @@ use crate::version::{Filter as _, Version, VersionFilter, VersionList};
 struct Options {
     /// Whether to inject `#[cfg(feature = "...")]` when generating code or not.
     features: bool,
+    /// Whether modules starting with an underscore (`_`) are omitted from the generated code or not.
+    invisible_modules: bool,
 }
 impl Default for Options {
     #[inline]
-    fn default() -> Self { Self { features: false } }
+    fn default() -> Self { Self { features: false, invisible_modules: true } }
 }
 
 
@@ -89,6 +91,20 @@ fn parse_input(tokens: TokenStream2) -> Result<(VersionList, Options), Diagnosti
 
                     // Store it
                     opts.features = val;
+                } else if nv.path.is_ident("invisible_modules") {
+                    // Parse the value as a boolean literal
+                    let val: bool = if let Expr::Lit(ExprLit { lit: Lit::Bool(LitBool { value, .. }), .. }) = nv.value {
+                        value
+                    } else {
+                        return Err(Diagnostic::spanned(
+                            nv.value.span(),
+                            Level::Error,
+                            "'invisible_modules' option must be given a boolean (true/false)".into(),
+                        ));
+                    };
+
+                    // Store it
+                    opts.invisible_modules = val;
                 } else {
                     return Err(Diagnostic::spanned(
                         nv.path.span(),
@@ -116,7 +132,7 @@ fn parse_input(tokens: TokenStream2) -> Result<(VersionList, Options), Diagnosti
 ///
 /// # Returns
 /// The [`VersionFilterList`] specified in the `#[version(...)]`-macro if it was found, or else [`None`] if the macro wasn't given.
-pub fn remove_version_attr(attrs: &mut Vec<Attribute>) -> Result<Option<VersionFilter>, Diagnostic> {
+fn remove_version_attr(attrs: &mut Vec<Attribute>) -> Result<Option<VersionFilter>, Diagnostic> {
     // Iterate over the attributes
     for (i, attr) in attrs.into_iter().enumerate() {
         match &attr.meta {
@@ -149,10 +165,13 @@ pub fn remove_version_attr(attrs: &mut Vec<Attribute>) -> Result<Option<VersionF
 /// - `item`: The [`BodyItem`] to filter.
 /// - `versions`: The list of versions in total (allows us to define order)
 /// - `version`: The current version to filter for.
+/// - `opts`: Any options active.
+/// - `is_toplevel`: If true, assumes we're working on the toplevel. This means that:
+///    - Modules starting with `_` are not generated, but only their contents (i.e., invisible top modules).
 ///
 /// # Returns
 /// A new [`TokenStream2`] that encodes the body item but without certain components if filtered out by the version.
-pub fn filter_item(mut item: BodyItem, versions: &VersionList, version: &Version) -> Result<TokenStream2, Diagnostic> {
+fn filter_item(mut item: BodyItem, versions: &VersionList, version: &Version, opts: &Options, is_toplevel: bool) -> Result<TokenStream2, Diagnostic> {
     // First, check the item's attributes to see if it has been version filtered
     if let Some(filter) = remove_version_attr(item.attrs_mut())? {
         // Next, see if this matches the current version
@@ -168,16 +187,22 @@ pub fn filter_item(mut item: BodyItem, versions: &VersionList, version: &Version
             // Recurse into the contents first
             let mut filtered: TokenStream2 = TokenStream2::new();
             for item in items {
-                filtered.extend(filter_item(item, versions, version)?);
+                filtered.extend(filter_item(item, versions, version, opts, false)?);
             }
 
-            // Now make the module
-            Ok(quote! {
-                #(#attrs)*
-                #vis #unsafety #mod_token #name {
+            // Now make the module - but only if given!
+            if opts.invisible_modules && is_toplevel && name.to_string().starts_with('_') {
+                Ok(quote! {
                     #filtered
-                } #semi_token
-            })
+                })
+            } else {
+                Ok(quote! {
+                    #(#attrs)*
+                    #vis #unsafety #mod_token #name {
+                        #filtered
+                    } #semi_token
+                })
+            }
         },
 
         BodyItem::Enum(mut e) => {
@@ -359,9 +384,9 @@ pub fn call(attrs: TokenStream2, input: TokenStream2) -> Result<TokenStream2, Di
     let mut impls: Vec<TokenStream2> = Vec::with_capacity(versions.0.len());
     for version in &versions.0 {
         // Collect the filtered editions of this item and all its contents
-        let filtered: TokenStream2 = filter_item(body.clone(), &versions, version)?;
+        let filtered: TokenStream2 = filter_item(body.clone(), &versions, version, &opts, true)?;
 
-        // Check if we need to inject summat or not
+        // Check if we need to inject the feature gate or not
         let cfg: Option<TokenStream2> = if opts.features {
             let feature: String = version.0.to_string();
             Some(quote! {

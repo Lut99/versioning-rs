@@ -4,7 +4,7 @@
 //  Created:
 //    18 Nov 2023, 13:06:17
 //  Last edited:
-//    20 Dec 2023, 19:15:11
+//    21 Dec 2023, 09:50:38
 //  Auto updated?
 //    Yes
 //
@@ -46,7 +46,7 @@ pub mod take4 {
     use versioning::versioning;
 
     #[versioning(v1_0_0, v2_0_0, v3_0_0)]
-    pub(super) mod defs {
+    pub(super) mod _defs {
         #[version(any("v1_0_0", "v2_0_0"))]
         mod private {
             #[version("v1_0_0")]
@@ -78,6 +78,6 @@ fn main() {
     let _a = take1::v1_0_0::defs::FileDefinition {};
 
     // Also works with impls, if annotated correctly :)
-    let _b = take4::v1_0_0::defs::FileDefinition4a::new();
-    let _c = take4::v2_0_0::defs::FileDefinition4b {};
+    let _b = take4::v1_0_0::FileDefinition4a::new();
+    let _c = take4::v2_0_0::FileDefinition4b {};
 }
