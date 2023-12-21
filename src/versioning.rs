@@ -4,7 +4,7 @@
 //  Created:
 //    19 Nov 2023, 19:25:25
 //  Last edited:
-//    21 Dec 2023, 10:47:08
+//    21 Dec 2023, 10:50:02
 //  Auto updated?
 //    Yes
 //
@@ -73,7 +73,7 @@ fn item_attrs_mut(item: &mut Item) -> &mut Vec<Attribute> {
         | Item::TraitAlias(ItemTraitAlias { attrs, .. }) => attrs,
 
         // And any others, 'cuz non-exhaustive ;(
-        _ => unimplemented!(),
+        other => panic!("Encountered unknown Item variant '{other:?}'"),
     }
 }
 /// Gets the visibility of an [`Item`], mutably.
@@ -101,7 +101,7 @@ fn item_vis_mut(item: &mut Item) -> Option<&mut Visibility> {
         Item::ForeignMod(ItemForeignMod { .. }) | Item::Impl(ItemImpl { .. }) | Item::Macro(ItemMacro { .. }) => None,
 
         // And any others, 'cuz non-exhaustive ;(
-        _ => unimplemented!(),
+        other => panic!("Encountered unknown Item variant '{other:?}'"),
     }
 }
 
@@ -125,7 +125,7 @@ fn trait_item_attrs_mut(item: &mut TraitItem) -> Option<&mut Vec<Attribute>> {
         TraitItem::Verbatim(_) => None,
 
         // And any others, 'cuz non-exhaustive ;(
-        _ => unimplemented!(),
+        other => panic!("Encountered unknown TraitItem variant '{other:?}'"),
     }
 }
 
@@ -149,7 +149,7 @@ fn foreign_item_attrs_mut(item: &mut ForeignItem) -> Option<&mut Vec<Attribute>>
         ForeignItem::Verbatim(_) => None,
 
         // And any others, 'cuz non-exhaustive ;(
-        _ => unimplemented!(),
+        other => panic!("Encountered unknown ForeignItem variant '{other:?}'"),
     }
 }
 
@@ -474,7 +474,7 @@ fn filter_item(mut item: Item, versions: &VersionList, version: &Version) -> Res
                     },
 
                     // Rest is always kept
-                    _ => unimplemented!(),
+                    other => panic!("Encountered unknown ImplItem variant '{other:?}'"),
                 };
 
                 // Then keep it if so
@@ -500,7 +500,7 @@ fn filter_item(mut item: Item, versions: &VersionList, version: &Version) -> Res
         },
 
         // ...and undefined ones are errors, if ever
-        _ => unimplemented!(),
+        other => panic!("Encountered unknown Item variant '{other:?}'"),
     }
 }
 
