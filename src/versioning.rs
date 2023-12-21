@@ -4,7 +4,7 @@
 //  Created:
 //    19 Nov 2023, 19:25:25
 //  Last edited:
-//    21 Dec 2023, 10:50:02
+//    21 Dec 2023, 10:55:00
 //  Auto updated?
 //    Yes
 //
@@ -21,8 +21,8 @@ use syn::token::{Brace, Comma, Mod, Pub};
 use syn::{
     Attribute, Expr, ExprLit, Field, Fields, ForeignItem, ForeignItemFn, ForeignItemMacro, ForeignItemStatic, ForeignItemType, ImplItem,
     ImplItemConst, ImplItemFn, ImplItemMacro, ImplItemType, Item, ItemConst, ItemEnum, ItemExternCrate, ItemFn, ItemForeignMod, ItemImpl, ItemMacro,
-    ItemMod, ItemStatic, ItemStruct, ItemTrait, ItemTraitAlias, Lit, LitBool, Meta, TraitItem, TraitItemConst, TraitItemFn, TraitItemMacro,
-    TraitItemType, Variant, Visibility,
+    ItemMod, ItemStatic, ItemStruct, ItemTrait, ItemTraitAlias, ItemType, ItemUnion, ItemUse, Lit, LitBool, Meta, TraitItem, TraitItemConst,
+    TraitItemFn, TraitItemMacro, TraitItemType, Variant, Visibility,
 };
 
 // use crate::spec::BodyItem;
@@ -56,7 +56,7 @@ impl Default for Options {
 /// # Returns
 /// A mutable list of [`Attribute`]s.
 #[inline]
-fn item_attrs_mut(item: &mut Item) -> &mut Vec<Attribute> {
+fn item_attrs_mut(item: &mut Item) -> Option<&mut Vec<Attribute>> {
     match item {
         // All the ones we know
         Item::Const(ItemConst { attrs, .. })
@@ -70,7 +70,13 @@ fn item_attrs_mut(item: &mut Item) -> &mut Vec<Attribute> {
         | Item::Static(ItemStatic { attrs, .. })
         | Item::Struct(ItemStruct { attrs, .. })
         | Item::Trait(ItemTrait { attrs, .. })
-        | Item::TraitAlias(ItemTraitAlias { attrs, .. }) => attrs,
+        | Item::TraitAlias(ItemTraitAlias { attrs, .. })
+        | Item::Type(ItemType { attrs, .. })
+        | Item::Union(ItemUnion { attrs, .. })
+        | Item::Use(ItemUse { attrs, .. }) => Some(attrs),
+
+        // Vertabim doesn't have attrs, unfortunately
+        Item::Verbatim(_) => None,
 
         // And any others, 'cuz non-exhaustive ;(
         other => panic!("Encountered unknown Item variant '{other:?}'"),
@@ -95,10 +101,13 @@ fn item_vis_mut(item: &mut Item) -> Option<&mut Visibility> {
         | Item::Static(ItemStatic { vis, .. })
         | Item::Struct(ItemStruct { vis, .. })
         | Item::Trait(ItemTrait { vis, .. })
-        | Item::TraitAlias(ItemTraitAlias { vis, .. }) => Some(vis),
+        | Item::TraitAlias(ItemTraitAlias { vis, .. })
+        | Item::Type(ItemType { vis, .. })
+        | Item::Union(ItemUnion { vis, .. })
+        | Item::Use(ItemUse { vis, .. }) => Some(vis),
 
         // All the ones we know that _don't_ have visibility
-        Item::ForeignMod(ItemForeignMod { .. }) | Item::Impl(ItemImpl { .. }) | Item::Macro(ItemMacro { .. }) => None,
+        Item::ForeignMod(ItemForeignMod { .. }) | Item::Impl(ItemImpl { .. }) | Item::Macro(ItemMacro { .. }) | Item::Verbatim(_) => None,
 
         // And any others, 'cuz non-exhaustive ;(
         other => panic!("Encountered unknown Item variant '{other:?}'"),
@@ -277,12 +286,14 @@ fn remove_version_attr(attrs: &mut Vec<Attribute>) -> Result<Option<VersionFilte
 /// A new [`TokenStream2`] that encodes the body item but without certain components if filtered out by the version.
 fn filter_item(mut item: Item, versions: &VersionList, version: &Version) -> Result<Option<Item>, Diagnostic> {
     // First, check the item's attributes to see if it has been version filtered
-    if let Some(filter) = remove_version_attr(item_attrs_mut(&mut item))? {
-        // Next, see if this matches the current version
-        filter.verify(versions)?;
-        if !filter.matches(versions, version) {
-            // Filtered oot!
-            return Ok(None);
+    if let Some(attrs) = item_attrs_mut(&mut item) {
+        if let Some(filter) = remove_version_attr(attrs)? {
+            // Next, see if this matches the current version
+            filter.verify(versions)?;
+            if !filter.matches(versions, version) {
+                // Filtered oot!
+                return Ok(None);
+            }
         }
     }
 
@@ -408,6 +419,25 @@ fn filter_item(mut item: Item, versions: &VersionList, version: &Version) -> Res
             // Then serialize
             Ok(Some(Item::Struct(s)))
         },
+        Item::Union(mut u) => {
+            // Filter the union's fields
+            let mut ffields: Punctuated<Field, Comma> = Punctuated::new();
+            for mut field in u.fields.named {
+                // See if this field has the attribute
+                if let Some(filter) = remove_version_attr(&mut field.attrs)? {
+                    filter.verify(versions)?;
+                    if !filter.matches(versions, version) {
+                        // Don't add it!
+                        continue;
+                    }
+                }
+                ffields.push(field);
+            }
+            u.fields.named = ffields;
+
+            // Then serialize
+            Ok(Some(Item::Union(u)))
+        },
         Item::Trait(mut t) => {
             // Filter the trait's items
             let mut fitems: Vec<TraitItem> = Vec::with_capacity(t.items.len());
@@ -494,7 +524,10 @@ fn filter_item(mut item: Item, versions: &VersionList, version: &Version) -> Res
             && matches!(item, Item::Fn(_))
             && matches!(item, Item::Macro(_))
             && matches!(item, Item::Static(_))
-            && matches!(item, Item::TraitAlias(_)) =>
+            && matches!(item, Item::TraitAlias(_))
+            && matches!(item, Item::Type(_))
+            && matches!(item, Item::Use(_))
+            && matches!(item, Item::Verbatim(_)) =>
         {
             Ok(Some(item))
         },
