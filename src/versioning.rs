@@ -4,7 +4,7 @@
 //  Created:
 //    19 Nov 2023, 19:25:25
 //  Last edited:
-//    21 Dec 2023, 09:56:15
+//    21 Dec 2023, 10:03:59
 //  Auto updated?
 //    Yes
 //
@@ -368,8 +368,8 @@ pub fn call(attrs: TokenStream2, input: TokenStream2) -> Result<TokenStream2, Di
     let input_span: Span = input.span();
     let mut body: BodyItem = match syn::parse2(input) {
         Ok(body) => body,
-        Err(_) => {
-            return Err(Diagnostic::spanned(input_span, Level::Error, "Can only use `#[versioned(...)]` macro on modules, structs or enums".into()));
+        Err(err) => {
+            return Err(Diagnostic::spanned(input_span, Level::Error, err.to_string()));
         },
     };
 

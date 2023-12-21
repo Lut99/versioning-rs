@@ -4,7 +4,7 @@
 //  Created:
 //    20 Nov 2023, 13:02:02
 //  Last edited:
-//    20 Dec 2023, 16:14:26
+//    21 Dec 2023, 10:03:23
 //  Auto updated?
 //    Yes
 //
@@ -73,7 +73,7 @@ impl TryFrom<Item> for BodyItem {
             Item::Enum(e) => e.try_into(),
             Item::Struct(s) => s.try_into(),
             Item::Impl(i) => i.try_into(),
-            other => return Err(syn::Error::new(other.span(), "Expected struct or enum definition")),
+            other => return Err(syn::Error::new(other.span(), "Expected mode, struct, enum or impl definition")),
         }
     }
 }
