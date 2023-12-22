@@ -4,7 +4,7 @@
 //  Created:
 //    19 Nov 2023, 19:25:25
 //  Last edited:
-//    21 Dec 2023, 10:57:06
+//    22 Dec 2023, 16:44:03
 //  Auto updated?
 //    Yes
 //
@@ -48,15 +48,15 @@ impl Default for Options {
 
 
 /***** HELPER FUNCTIONS *****/
-/// Gets the attributes of an [`Item`], mutably.
+/// Gets the attributes of an [`Item`].
 ///
 /// # Arguments
-/// - `item`: A(n) (mutable reference to the) [`Item`] of which to return the attributes.
+/// - `item`: A(n) (reference to the) [`Item`] of which to return the attributes.
 ///
 /// # Returns
-/// A mutable list of [`Attribute`]s.
+/// A list of [`Attribute`]s.
 #[inline]
-fn item_attrs_mut(item: &mut Item) -> Option<&mut Vec<Attribute>> {
+fn item_attrs(item: &Item) -> Option<&[Attribute]> {
     match item {
         // All the ones we know
         Item::Const(ItemConst { attrs, .. })
@@ -241,14 +241,12 @@ fn parse_input(tokens: TokenStream2) -> Result<(VersionList, Options), Diagnosti
 
 /// Attempts to read the `#[version(...)]`-attribute from the given list of attributes.
 ///
-/// Then removes it from the given list if found.
-///
 /// # Arguments
 /// - `attrs`: The attributes to read.
 ///
 /// # Returns
 /// The [`VersionFilterList`] specified in the `#[version(...)]`-macro if it was found, or else [`None`] if the macro wasn't given.
-fn remove_version_attr(attrs: &mut Vec<Attribute>) -> Result<Option<VersionFilter>, Diagnostic> {
+fn get_version_attr(attrs: &[Attribute]) -> Result<Option<VersionFilter>, Diagnostic> {
     // Iterate over the attributes
     for (i, attr) in attrs.into_iter().enumerate() {
         match &attr.meta {
@@ -257,7 +255,6 @@ fn remove_version_attr(attrs: &mut Vec<Attribute>) -> Result<Option<VersionFilte
                     return match l.parse_args() {
                         Ok(filter) => {
                             // Before we return, remove from the list
-                            attrs.remove(i);
                             Ok(Some(filter))
                         },
                         Err(err) => Err(Diagnostic::spanned(err.span(), Level::Error, err.to_string())),
@@ -275,31 +272,38 @@ fn remove_version_attr(attrs: &mut Vec<Attribute>) -> Result<Option<VersionFilte
     Ok(None)
 }
 
-/// Filters the given body item in accordance to the list of versions.
+/// Filters the given body item in accordance to the list of versions and compiles it to a [`TokenStream2`].
 ///
 /// # Arguments
 /// - `item`: The [`BodyItem`] to filter.
 /// - `versions`: The list of versions in total (allows us to define order)
 /// - `version`: The current version to filter for.
+/// - `force_public`: If given, always writes a `pub` for his item (in case it's nested in a version module). Note that nested modules are always hardcoded to `false`.
 ///
 /// # Returns
 /// A new [`TokenStream2`] that encodes the body item but without certain components if filtered out by the version.
-fn filter_item(mut item: Item, versions: &VersionList, version: &Version) -> Result<Option<Item>, Diagnostic> {
+fn generate_filtered(item: &Item, versions: &VersionList, version: &Version, force_public: bool) -> Result<TokenStream2, Diagnostic> {
     // First, check the item's attributes to see if it has been version filtered
-    if let Some(attrs) = item_attrs_mut(&mut item) {
-        if let Some(filter) = remove_version_attr(attrs)? {
+    if let Some(attrs) = item_attrs(item) {
+        if let Some(filter) = get_version_attr(attrs)? {
             // Next, see if this matches the current version
             filter.verify(versions)?;
             if !filter.matches(versions, version) {
                 // Filtered oot!
-                return Ok(None);
+                return Ok(quote! {});
             }
         }
     }
 
     // Then recurse if necessary
     match item {
-        Item::Mod(mut m) => {
+        Item::Mod(ItemMod { attrs, vis, unsafety, mod_token, ident, content, semi }) => {
+            // Serialize the attributes as first part of the module
+            let mut stream: TokenStream2 = quote! {
+                #attrs
+            };
+
+
             // Recursively only keep OK modules
             if let Some((brace, items)) = m.content {
                 let mut fitems: Vec<Item> = Vec::with_capacity(items.len());
@@ -310,7 +314,7 @@ fn filter_item(mut item: Item, versions: &VersionList, version: &Version) -> Res
                     }
                 }
                 m.content = Some((brace, fitems));
-            }
+            };
 
             // OK, let's return!
             Ok(Some(Item::Mod(m)))
