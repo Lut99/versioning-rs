@@ -4,7 +4,7 @@
 //  Created:
 //    19 Nov 2023, 19:25:25
 //  Last edited:
-//    22 Dec 2023, 16:44:03
+//    22 Dec 2023, 20:52:56
 //  Auto updated?
 //    Yes
 //
@@ -14,7 +14,7 @@
 
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use proc_macro_error::{Diagnostic, Level};
-use quote::quote;
+use quote::{quote, quote_spanned, TokenStreamExt};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::token::{Brace, Comma, Mod, Pub};
@@ -272,6 +272,18 @@ fn get_version_attr(attrs: &[Attribute]) -> Result<Option<VersionFilter>, Diagno
     Ok(None)
 }
 
+/// Filters the given enum variant in accordance to the list of versions and compiles it to a [`TokenStream2`].
+/// 
+/// # Arguments
+/// - `item`: The [`BodyItem`] to filter.
+/// - `versions`: The list of versions in total (allows us to define order)
+/// - `version`: The current version to filter for.
+///
+/// # Returns
+/// A new [`TokenStream2`] that encodes the body item but without certain components if filtered out by the version.
+fn generate_filtered_variant(variant: &Variant, versions: &VersionList, version: &Version) -> Result<Option<TokenStream2>, Diagnostic> {
+    Ok(None)
+}
 /// Filters the given body item in accordance to the list of versions and compiles it to a [`TokenStream2`].
 ///
 /// # Arguments
@@ -282,7 +294,7 @@ fn get_version_attr(attrs: &[Attribute]) -> Result<Option<VersionFilter>, Diagno
 ///
 /// # Returns
 /// A new [`TokenStream2`] that encodes the body item but without certain components if filtered out by the version.
-fn generate_filtered(item: &Item, versions: &VersionList, version: &Version, force_public: bool) -> Result<TokenStream2, Diagnostic> {
+fn generate_filtered_item(item: &Item, versions: &VersionList, version: &Version, force_public: bool) -> Result<Option<TokenStream2>, Diagnostic> {
     // First, check the item's attributes to see if it has been version filtered
     if let Some(attrs) = item_attrs(item) {
         if let Some(filter) = get_version_attr(attrs)? {
@@ -290,7 +302,7 @@ fn generate_filtered(item: &Item, versions: &VersionList, version: &Version, for
             filter.verify(versions)?;
             if !filter.matches(versions, version) {
                 // Filtered oot!
-                return Ok(quote! {});
+                return Ok(None);
             }
         }
     }
@@ -300,27 +312,66 @@ fn generate_filtered(item: &Item, versions: &VersionList, version: &Version, for
         Item::Mod(ItemMod { attrs, vis, unsafety, mod_token, ident, content, semi }) => {
             // Serialize the attributes as first part of the module
             let mut stream: TokenStream2 = quote! {
-                #attrs
+                #(#attrs)*
             };
-
-
-            // Recursively only keep OK modules
-            if let Some((brace, items)) = m.content {
-                let mut fitems: Vec<Item> = Vec::with_capacity(items.len());
+            // Serialize the visibility
+            if force_public {
+                let vis: Visibility = Visibility::Public(Pub { span: vis.span() });
+                stream.extend(quote! { #vis });
+            } else {
+                stream.extend(quote! { #vis });
+            }
+            // Serialize some other parts
+            stream.extend(quote! {
+                #unsafety #mod_token #ident
+            });
+            // Serialize content if there is any
+            if let Some((brace, items)) = content {
+                // Serialize all children
+                let mut children: TokenStream2 = TokenStream2::new();
                 for item in items {
                     // Only keep OK ones
-                    if let Some(item) = filter_item(item, versions, version)? {
-                        fitems.push(item);
+                    if let Some(stream) = generate_filtered_item(item, versions, version, false)? {
+                        children.extend(stream);
                     }
                 }
-                m.content = Some((brace, fitems));
+                // Serialize them with braces
+                brace.surround(&mut stream, |stream: &mut TokenStream2| {
+                    stream.extend(children);
+                });
             };
+            // Serialize the possible brace
+            stream.extend(quote! {
+                #semi
+            });
 
             // OK, let's return!
-            Ok(Some(Item::Mod(m)))
+            Ok(Some(stream))
         },
 
-        Item::Enum(mut e) => {
+        Item::Enum(ItemEnum { attrs, vis, enum_token, ident, generics, brace_token, variants }) => {
+            // First, serialize the attributes
+            let mut stream: TokenStream2 = quote! {
+                #(#attrs)*
+            };
+            // Serialize the visibility
+            if force_public {
+                let vis: Visibility = Visibility::Public(Pub { span: vis.span() });
+                stream.extend(quote! { #vis });
+            } else {
+                stream.extend(quote! { #vis });
+            }
+            // Serialize some other parts
+            stream.extend(quote! {
+                #enum_token #ident #generics
+            });
+            // Add the variants wrapped in braces
+            let mut children: TokenStream2 = TokenStream2::new();
+            for variant in variants {
+                if let Some(filter) = generate_filtered_variant()
+            }
+            });
+
             // Filter variants next
             let mut fvariants: Punctuated<Variant, Comma> = Punctuated::new();
             for mut variant in e.variants {
