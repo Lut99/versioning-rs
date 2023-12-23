@@ -4,7 +4,7 @@
 //  Created:
 //    19 Nov 2023, 19:25:25
 //  Last edited:
-//    22 Dec 2023, 20:52:56
+//    23 Dec 2023, 15:46:37
 //  Auto updated?
 //    Yes
 //
@@ -12,17 +12,19 @@
 //!   Implements the toplevel of the `#[versioned(...)]`-macro.
 //
 
+use std::borrow::Cow;
+
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use proc_macro_error::{Diagnostic, Level};
-use quote::{quote, quote_spanned, TokenStreamExt};
+use quote::quote;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
-use syn::token::{Brace, Comma, Mod, Pub};
+use syn::token::{Comma, Pub};
 use syn::{
-    Attribute, Expr, ExprLit, Field, Fields, ForeignItem, ForeignItemFn, ForeignItemMacro, ForeignItemStatic, ForeignItemType, ImplItem,
-    ImplItemConst, ImplItemFn, ImplItemMacro, ImplItemType, Item, ItemConst, ItemEnum, ItemExternCrate, ItemFn, ItemForeignMod, ItemImpl, ItemMacro,
-    ItemMod, ItemStatic, ItemStruct, ItemTrait, ItemTraitAlias, ItemType, ItemUnion, ItemUse, Lit, LitBool, Meta, TraitItem, TraitItemConst,
-    TraitItemFn, TraitItemMacro, TraitItemType, Variant, Visibility,
+    Attribute, Expr, ExprLit, Field, Fields, FieldsNamed, FieldsUnnamed, ForeignItem, ForeignItemFn, ForeignItemMacro, ForeignItemStatic,
+    ForeignItemType, Ident, ImplItem, ImplItemConst, ImplItemFn, ImplItemMacro, ImplItemType, Item, ItemConst, ItemEnum, ItemExternCrate, ItemFn,
+    ItemForeignMod, ItemImpl, ItemMacro, ItemMod, ItemStatic, ItemStruct, ItemTrait, ItemTraitAlias, ItemType, ItemUnion, ItemUse, Lit, LitBool,
+    Meta, TraitItem, TraitItemConst, TraitItemFn, TraitItemMacro, TraitItemType, Variant, Visibility,
 };
 
 // use crate::spec::BodyItem;
@@ -82,15 +84,15 @@ fn item_attrs(item: &Item) -> Option<&[Attribute]> {
         other => panic!("Encountered unknown Item variant '{other:?}'"),
     }
 }
-/// Gets the visibility of an [`Item`], mutably.
+/// Gets the visibility of an [`Item`].
 ///
 /// # Arguments
-/// - `item`: A(n) (mutable reference to the) [`Item`] of which to return the attributes.
+/// - `item`: A(n) (reference to the) [`Item`] of which to return the attributes.
 ///
 /// # Returns
-/// A mutable reference to the [`Visibility`], or [`None`] if this variant does not have any.
+/// A reference to the [`Visibility`], or [`None`] if this variant does not have any.
 #[inline]
-fn item_vis_mut(item: &mut Item) -> Option<&mut Visibility> {
+fn item_vis(item: &Item) -> Option<&Visibility> {
     match item {
         // All the ones we know and have visibility
         Item::Const(ItemConst { vis, .. })
@@ -114,15 +116,15 @@ fn item_vis_mut(item: &mut Item) -> Option<&mut Visibility> {
     }
 }
 
-/// Gets the attributes of a [`TraitItem`], mutably.
+/// Gets the attributes of a [`TraitItem`].
 ///
 /// # Arguments
-/// - `item`: A (mutable reference to the) [`TraitItem`] of which to return the attributes.
+/// - `item`: A (reference to the) [`TraitItem`] of which to return the attributes.
 ///
 /// # Returns
-/// A mutable list of [`Attribute`]s, or [`None`] if this variant does not have any.
+/// A list of [`Attribute`]s, or [`None`] if this variant does not have any.
 #[inline]
-fn trait_item_attrs_mut(item: &mut TraitItem) -> Option<&mut Vec<Attribute>> {
+fn trait_item_attrs(item: &TraitItem) -> Option<&[Attribute]> {
     match item {
         // All the ones we know
         TraitItem::Const(TraitItemConst { attrs, .. })
@@ -138,15 +140,15 @@ fn trait_item_attrs_mut(item: &mut TraitItem) -> Option<&mut Vec<Attribute>> {
     }
 }
 
-/// Gets the attributes of a [`ForeignItem`], mutably.
+/// Gets the attributes of a [`ForeignItem`].
 ///
 /// # Arguments
-/// - `item`: A (mutable reference to the) [`ForeignItem`] of which to return the attributes.
+/// - `item`: A (reference to the) [`ForeignItem`] of which to return the attributes.
 ///
 /// # Returns
-/// A mutable list of [`Attribute`]s, or [`None`] if this variant does not have any.
+/// A list of [`Attribute`]s, or [`None`] if this variant does not have any.
 #[inline]
-fn foreign_item_attrs_mut(item: &mut ForeignItem) -> Option<&mut Vec<Attribute>> {
+fn foreign_item_attrs(item: &ForeignItem) -> Option<&[Attribute]> {
     match item {
         // All the ones we know
         ForeignItem::Fn(ForeignItemFn { attrs, .. })
@@ -161,6 +163,32 @@ fn foreign_item_attrs_mut(item: &mut ForeignItem) -> Option<&mut Vec<Attribute>>
         other => panic!("Encountered unknown ForeignItem variant '{other:?}'"),
     }
 }
+
+/// Gets the attributes of an [`ImplItem`].
+///
+/// # Arguments
+/// - `item`: A (reference to the) [`ForeignItem`] of which to return the attributes.
+///
+/// # Returns
+/// A list of [`Attribute`]s, or [`None`] if this variant does not have any.
+#[inline]
+fn impl_item_attrs(item: &ImplItem) -> Option<&[Attribute]> {
+    match item {
+        // All the ones we know
+        ImplItem::Const(ImplItemConst { attrs, .. })
+        | ImplItem::Fn(ImplItemFn { attrs, .. })
+        | ImplItem::Macro(ImplItemMacro { attrs, .. })
+        | ImplItem::Type(ImplItemType { attrs, .. }) => Some(attrs),
+
+        // Except for the vertabim; that one doesn't have any attrs
+        ImplItem::Verbatim(_) => None,
+
+        // And any others, 'cuz non-exhaustive ;(
+        other => panic!("Encountered unknown ImplItem variant '{other:?}'"),
+    }
+}
+
+
 
 /// Parses macro input as a [`VersionList`] and any options given as a key/value pair.
 ///
@@ -248,7 +276,7 @@ fn parse_input(tokens: TokenStream2) -> Result<(VersionList, Options), Diagnosti
 /// The [`VersionFilterList`] specified in the `#[version(...)]`-macro if it was found, or else [`None`] if the macro wasn't given.
 fn get_version_attr(attrs: &[Attribute]) -> Result<Option<VersionFilter>, Diagnostic> {
     // Iterate over the attributes
-    for (i, attr) in attrs.into_iter().enumerate() {
+    for attr in attrs {
         match &attr.meta {
             Meta::List(l) => {
                 if l.path.is_ident("version") {
@@ -272,29 +300,306 @@ fn get_version_attr(attrs: &[Attribute]) -> Result<Option<VersionFilter>, Diagno
     Ok(None)
 }
 
-/// Filters the given enum variant in accordance to the list of versions and compiles it to a [`TokenStream2`].
-/// 
+
+
+/// Filters the given attributes minus the `#[version(...)]`-attribute and compiles it to a [`TokenStream2`].
+///
 /// # Arguments
-/// - `item`: The [`BodyItem`] to filter.
+/// - `attrs`: The list of [`Attribute`]s to filter.
+///
+/// # Returns
+/// A new [`TokenStream2`] that encodes the body item but without certain components if filtered out by the version.
+fn generate_attrs(attrs: &[Attribute]) -> TokenStream2 {
+    // Serialize them all, except the ones we don't like
+    let mut stream: TokenStream2 = TokenStream2::new();
+    for attr in attrs {
+        // See if it's a match
+        if !attr.path().is_ident("version") {
+            stream.extend(quote! { #attr });
+        }
+    }
+    stream
+}
+
+/// Filters the given field in accordance to the list of versions and compiles it to a [`TokenStream2`].
+///
+/// # Arguments
+/// - `field`: The [`Field`] to filter.
+/// - `versions`: The list of versions in total (allows us to define order)
+/// - `version`: The current version to filter for.
+///
+/// # Returns
+/// A new [`TokenStream2`] that encodes the body item but without certain components if filtered out by the version.
+fn generate_filtered_field(field: &Field, versions: &VersionList, version: &Version) -> Result<Option<TokenStream2>, Diagnostic> {
+    // First, check the item's attributes to see if it has been version filtered
+    if let Some(filter) = get_version_attr(&field.attrs)? {
+        // Next, see if this matches the current version
+        filter.verify(versions)?;
+        if !filter.matches(versions, version) {
+            // Filtered oot!
+            return Ok(None);
+        }
+    }
+
+    // Otherwise, serialize with adapted attributes
+    let Field { attrs, vis, mutability: _, ident, colon_token, ty } = field;
+    let mut stream: TokenStream2 = generate_attrs(attrs);
+    stream.extend(quote! { #vis #ident #colon_token #ty });
+    Ok(Some(stream))
+}
+
+/// Filters the given enum variant in accordance to the list of versions and compiles it to a [`TokenStream2`].
+///
+/// # Arguments
+/// - `variant`: The [`Variant`] to filter.
 /// - `versions`: The list of versions in total (allows us to define order)
 /// - `version`: The current version to filter for.
 ///
 /// # Returns
 /// A new [`TokenStream2`] that encodes the body item but without certain components if filtered out by the version.
 fn generate_filtered_variant(variant: &Variant, versions: &VersionList, version: &Version) -> Result<Option<TokenStream2>, Diagnostic> {
-    Ok(None)
+    // First, check the item's attributes to see if it has been version filtered
+    if let Some(filter) = get_version_attr(&variant.attrs)? {
+        // Next, see if this matches the current version
+        filter.verify(versions)?;
+        if !filter.matches(versions, version) {
+            // Filtered oot!
+            return Ok(None);
+        }
+    }
+
+    // Serialize the attributes as first part of the module
+    let Variant { attrs, ident, fields, discriminant } = variant;
+    let mut stream: TokenStream2 = generate_attrs(attrs);
+    stream.extend(quote! { #ident });
+    // Serialize the fields, if any
+    match fields {
+        Fields::Named(named) => {
+            // Serialize the field as a whole
+            let FieldsNamed { named, brace_token } = named;
+            let mut children: TokenStream2 = TokenStream2::new();
+            for pair in named.pairs() {
+                // Only add filtered ones too
+                let (field, comma): (&Field, Option<&Comma>) = pair.into_tuple();
+                if let Some(stream) = generate_filtered_field(field, versions, version)? {
+                    children.extend(stream);
+                    children.extend(quote! { #comma });
+                }
+            }
+            // Add the whole thing
+            brace_token.surround(&mut stream, |stream: &mut TokenStream2| stream.extend(children));
+        },
+        Fields::Unnamed(unnamed) => {
+            // Serialize the field as a whole
+            let FieldsUnnamed { unnamed, paren_token } = unnamed;
+            let mut children: TokenStream2 = TokenStream2::new();
+            for pair in unnamed.pairs() {
+                // Only add filtered ones too
+                let (field, comma): (&Field, Option<&Comma>) = pair.into_tuple();
+                if let Some(stream) = generate_filtered_field(field, versions, version)? {
+                    children.extend(stream);
+                    children.extend(quote! { #comma });
+                }
+            }
+            // Add the whole thing
+            paren_token.surround(&mut stream, |stream: &mut TokenStream2| stream.extend(children));
+        },
+        Fields::Unit => {},
+    }
+    // Serialize the discriminant, if any
+    if let Some((eq, expr)) = discriminant {
+        stream.extend(quote! { #eq #expr });
+    }
+
+    // Done!
+    Ok(Some(stream))
 }
+
+/// Filters the given trait item in accordance to the list of versions and compiles it to a [`TokenStream2`].
+///
+/// # Arguments
+/// - `item`: The [`TraitItem`] to filter.
+/// - `versions`: The list of versions in total (allows us to define order)
+/// - `version`: The current version to filter for.
+///
+/// # Returns
+/// A new [`TokenStream2`] that encodes the body item but without certain components if filtered out by the version.
+fn generate_filtered_trait_item(item: &TraitItem, versions: &VersionList, version: &Version) -> Result<Option<TokenStream2>, Diagnostic> {
+    // First, check the item's attributes to see if it has been version filtered
+    if let Some(attrs) = trait_item_attrs(item) {
+        if let Some(filter) = get_version_attr(attrs)? {
+            // Next, see if this matches the current version
+            filter.verify(versions)?;
+            if !filter.matches(versions, version) {
+                // Filtered oot!
+                return Ok(None);
+            }
+        }
+    }
+
+    // Match after all (third time we're writing this) to filter oot some attributes
+    match item {
+        TraitItem::Const(TraitItemConst { attrs, const_token, ident, generics, colon_token, ty, default, semi_token }) => {
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            stream.extend(quote! { #const_token #ident #generics #colon_token #ty });
+            if let Some((eq_token, expr)) = default {
+                stream.extend(quote! { #eq_token #expr })
+            }
+            stream.extend(quote! { #semi_token });
+            Ok(Some(stream))
+        },
+        TraitItem::Fn(TraitItemFn { attrs, sig, default, semi_token }) => {
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            stream.extend(quote! { #sig #default #semi_token });
+            Ok(Some(stream))
+        },
+        TraitItem::Macro(TraitItemMacro { attrs, mac, semi_token }) => {
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            stream.extend(quote! { #mac #semi_token });
+            Ok(Some(stream))
+        },
+        TraitItem::Type(TraitItemType { attrs, type_token, ident, generics, colon_token, bounds, default, semi_token }) => {
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            stream.extend(quote! { #type_token #ident #generics #colon_token #bounds });
+            if let Some((eq_token, expr)) = default {
+                stream.extend(quote! { #eq_token #expr })
+            }
+            stream.extend(quote! { #semi_token });
+            Ok(Some(stream))
+        },
+
+        // Vertabim is passed as-is
+        TraitItem::Verbatim(v) => Ok(Some(quote! { #v })),
+
+        // And any others, 'cuz non-exhaustive ;(
+        other => panic!("Encountered unknown TraitItem variant '{other:?}'"),
+    }
+}
+
+/// Filters the given foreign item in accordance to the list of versions and compiles it to a [`TokenStream2`].
+///
+/// # Arguments
+/// - `item`: The [`ForeignItem`] to filter.
+/// - `versions`: The list of versions in total (allows us to define order)
+/// - `version`: The current version to filter for.
+///
+/// # Returns
+/// A new [`TokenStream2`] that encodes the body item but without certain components if filtered out by the version.
+fn generate_filtered_foreign_item(item: &ForeignItem, versions: &VersionList, version: &Version) -> Result<Option<TokenStream2>, Diagnostic> {
+    // First, check the item's attributes to see if it has been version filtered
+    if let Some(attrs) = foreign_item_attrs(item) {
+        if let Some(filter) = get_version_attr(attrs)? {
+            // Next, see if this matches the current version
+            filter.verify(versions)?;
+            if !filter.matches(versions, version) {
+                // Filtered oot!
+                return Ok(None);
+            }
+        }
+    }
+
+    // Also needs to be manually matches to skip attributes
+    match item {
+        ForeignItem::Fn(ForeignItemFn { attrs, vis, sig, semi_token }) => {
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            stream.extend(quote! { #vis #sig #semi_token });
+            Ok(Some(stream))
+        },
+        ForeignItem::Macro(ForeignItemMacro { attrs, mac, semi_token }) => {
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            stream.extend(quote! { #mac #semi_token });
+            Ok(Some(stream))
+        },
+        ForeignItem::Static(ForeignItemStatic { attrs, vis, static_token, mutability, ident, colon_token, ty, semi_token }) => {
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            stream.extend(quote! { #vis #static_token #mutability #ident #colon_token #ty #semi_token });
+            Ok(Some(stream))
+        },
+        ForeignItem::Type(ForeignItemType { attrs, vis, type_token, ident, generics, semi_token }) => {
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            stream.extend(quote! { #vis #type_token #ident #generics #semi_token });
+            Ok(Some(stream))
+        },
+
+        // Vertabim is passed as-is
+        ForeignItem::Verbatim(v) => Ok(Some(quote! { #v })),
+
+        // And any others, 'cuz non-exhaustive ;(
+        other => panic!("Encountered unknown ForeignItem variant '{other:?}'"),
+    }
+}
+
+/// Filters the given impl item in accordance to the list of versions and compiles it to a [`TokenStream2`].
+///
+/// # Arguments
+/// - `item`: The [`ImplItem`] to filter.
+/// - `versions`: The list of versions in total (allows us to define order)
+/// - `version`: The current version to filter for.
+///
+/// # Returns
+/// A new [`TokenStream2`] that encodes the body item but without certain components if filtered out by the version.
+fn generate_filtered_impl_item(item: &ImplItem, versions: &VersionList, version: &Version) -> Result<Option<TokenStream2>, Diagnostic> {
+    // First, check the item's attributes to see if it has been version filtered
+    if let Some(attrs) = impl_item_attrs(item) {
+        if let Some(filter) = get_version_attr(attrs)? {
+            // Next, see if this matches the current version
+            filter.verify(versions)?;
+            if !filter.matches(versions, version) {
+                // Filtered oot!
+                return Ok(None);
+            }
+        }
+    }
+
+    // Also needs to be manually matches to skip attributes
+    match item {
+        ImplItem::Const(ImplItemConst { attrs, vis, defaultness, const_token, ident, generics, colon_token, ty, eq_token, expr, semi_token }) => {
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            stream.extend(quote! { #vis #defaultness #const_token #ident #generics #colon_token #ty #eq_token #expr #semi_token });
+            Ok(Some(stream))
+        },
+        ImplItem::Fn(ImplItemFn { attrs, vis, defaultness, sig, block }) => {
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            stream.extend(quote! { #vis #defaultness #sig #block });
+            Ok(Some(stream))
+        },
+        ImplItem::Macro(ImplItemMacro { attrs, mac, semi_token }) => {
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            stream.extend(quote! { #mac #semi_token });
+            Ok(Some(stream))
+        },
+        ImplItem::Type(ImplItemType { attrs, vis, defaultness, type_token, ident, generics, eq_token, ty, semi_token }) => {
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            stream.extend(quote! { #vis #defaultness #type_token #ident #generics #eq_token #ty #semi_token });
+            Ok(Some(stream))
+        },
+
+        // Vertabim is passed as-is
+        ImplItem::Verbatim(v) => Ok(Some(quote! { #v })),
+
+        // And any others, 'cuz non-exhaustive ;(
+        other => panic!("Encountered unknown ImplItem variant '{other:?}'"),
+    }
+}
+
 /// Filters the given body item in accordance to the list of versions and compiles it to a [`TokenStream2`].
 ///
 /// # Arguments
 /// - `item`: The [`BodyItem`] to filter.
 /// - `versions`: The list of versions in total (allows us to define order)
 /// - `version`: The current version to filter for.
+/// - `toplevel`: Only true for the first depth of recursion.
 /// - `force_public`: If given, always writes a `pub` for his item (in case it's nested in a version module). Note that nested modules are always hardcoded to `false`.
 ///
 /// # Returns
 /// A new [`TokenStream2`] that encodes the body item but without certain components if filtered out by the version.
-fn generate_filtered_item(item: &Item, versions: &VersionList, version: &Version, force_public: bool) -> Result<Option<TokenStream2>, Diagnostic> {
+fn generate_filtered_item(
+    item: &Item,
+    versions: &VersionList,
+    version: &Version,
+    toplevel: bool,
+    force_public: bool,
+) -> Result<Option<TokenStream2>, Diagnostic> {
     // First, check the item's attributes to see if it has been version filtered
     if let Some(attrs) = item_attrs(item) {
         if let Some(filter) = get_version_attr(attrs)? {
@@ -309,11 +614,10 @@ fn generate_filtered_item(item: &Item, versions: &VersionList, version: &Version
 
     // Then recurse if necessary
     match item {
+        // These all have some kind of recursion going on
         Item::Mod(ItemMod { attrs, vis, unsafety, mod_token, ident, content, semi }) => {
             // Serialize the attributes as first part of the module
-            let mut stream: TokenStream2 = quote! {
-                #(#attrs)*
-            };
+            let mut stream: TokenStream2 = generate_attrs(attrs);
             // Serialize the visibility
             if force_public {
                 let vis: Visibility = Visibility::Public(Pub { span: vis.span() });
@@ -323,22 +627,27 @@ fn generate_filtered_item(item: &Item, versions: &VersionList, version: &Version
             }
             // Serialize some other parts
             stream.extend(quote! {
-                #unsafety #mod_token #ident
+                #unsafety #mod_token
             });
+            // Serialize the indent, which is overridden is we _are_ toplevel but _not_ wrapping
+            if toplevel && !force_public {
+                let ident: &Ident = &version.0;
+                stream.extend(quote! { #ident });
+            } else {
+                stream.extend(quote! { #ident });
+            }
             // Serialize content if there is any
             if let Some((brace, items)) = content {
                 // Serialize all children
                 let mut children: TokenStream2 = TokenStream2::new();
                 for item in items {
                     // Only keep OK ones
-                    if let Some(stream) = generate_filtered_item(item, versions, version, false)? {
+                    if let Some(stream) = generate_filtered_item(item, versions, version, false, false)? {
                         children.extend(stream);
                     }
                 }
                 // Serialize them with braces
-                brace.surround(&mut stream, |stream: &mut TokenStream2| {
-                    stream.extend(children);
-                });
+                brace.surround(&mut stream, |stream: &mut TokenStream2| stream.extend(children));
             };
             // Serialize the possible brace
             stream.extend(quote! {
@@ -351,9 +660,7 @@ fn generate_filtered_item(item: &Item, versions: &VersionList, version: &Version
 
         Item::Enum(ItemEnum { attrs, vis, enum_token, ident, generics, brace_token, variants }) => {
             // First, serialize the attributes
-            let mut stream: TokenStream2 = quote! {
-                #(#attrs)*
-            };
+            let mut stream: TokenStream2 = generate_attrs(attrs);
             // Serialize the visibility
             if force_public {
                 let vis: Visibility = Visibility::Public(Pub { span: vis.span() });
@@ -367,225 +674,281 @@ fn generate_filtered_item(item: &Item, versions: &VersionList, version: &Version
             });
             // Add the variants wrapped in braces
             let mut children: TokenStream2 = TokenStream2::new();
-            for variant in variants {
-                if let Some(filter) = generate_filtered_variant()
+            for pair in variants.pairs() {
+                let (variant, comma): (&Variant, Option<&Comma>) = pair.into_tuple();
+                if let Some(stream) = generate_filtered_variant(variant, versions, version)? {
+                    children.extend(stream);
+                    children.extend(quote! { #comma });
+                }
             }
+            brace_token.surround(&mut stream, |stream: &mut TokenStream2| stream.extend(children));
+
+            // Done
+            Ok(Some(stream))
+        },
+        Item::Struct(ItemStruct { attrs, vis, struct_token, ident, generics, fields, semi_token }) => {
+            // First, serialize the attributes
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            // Serialize the visibility
+            if force_public {
+                let vis: Visibility = Visibility::Public(Pub { span: vis.span() });
+                stream.extend(quote! { #vis });
+            } else {
+                stream.extend(quote! { #vis });
+            }
+            // Serialize some other parts
+            stream.extend(quote! {
+                #struct_token #ident #generics
             });
-
-            // Filter variants next
-            let mut fvariants: Punctuated<Variant, Comma> = Punctuated::new();
-            for mut variant in e.variants {
-                // See if this variant has the attribute
-                if let Some(filter) = remove_version_attr(&mut variant.attrs)? {
-                    filter.verify(versions)?;
-                    if !filter.matches(versions, version) {
-                        // Don't add it!
-                        continue;
+            // Serialize the fields, if any
+            match fields {
+                Fields::Named(named) => {
+                    // Serialize the field as a whole
+                    let FieldsNamed { named, brace_token } = named;
+                    let mut children: TokenStream2 = TokenStream2::new();
+                    for pair in named.pairs() {
+                        // Only add filtered ones too
+                        let (field, comma): (&Field, Option<&Comma>) = pair.into_tuple();
+                        if let Some(stream) = generate_filtered_field(field, versions, version)? {
+                            children.extend(stream);
+                            children.extend(quote! { #comma });
+                        }
                     }
-                }
-
-                // Otherwise, examine the variant's fields
-                variant.fields = match variant.fields {
-                    Fields::Named(mut fields) => {
-                        let mut ffields: Punctuated<Field, Comma> = Punctuated::new();
-                        for mut field in fields.named {
-                            // See if this field has the attribute
-                            if let Some(filter) = remove_version_attr(&mut field.attrs)? {
-                                filter.verify(versions)?;
-                                if !filter.matches(versions, version) {
-                                    // Don't add it!
-                                    continue;
-                                }
-                            }
-                            ffields.push(field);
-                        }
-                        fields.named = ffields;
-                        Fields::Named(fields)
-                    },
-                    Fields::Unnamed(mut fields) => {
-                        let mut ffields: Punctuated<Field, Comma> = Punctuated::new();
-                        for mut field in fields.unnamed {
-                            // See if this field has the attribute
-                            if let Some(filter) = remove_version_attr(&mut field.attrs)? {
-                                filter.verify(versions)?;
-                                if !filter.matches(versions, version) {
-                                    // Don't add it!
-                                    continue;
-                                }
-                            }
-                            ffields.push(field);
-                        }
-                        fields.unnamed = ffields;
-                        Fields::Unnamed(fields)
-                    },
-
-                    // Nothing to do here
-                    Fields::Unit => Fields::Unit,
-                };
-
-                // Add it
-                fvariants.push(variant);
-            }
-            e.variants = fvariants;
-
-            // Then serialize
-            Ok(Some(Item::Enum(e)))
-        },
-        Item::Struct(mut s) => {
-            // Filter the struct's fields
-            s.fields = match s.fields {
-                Fields::Named(mut fields) => {
-                    let mut ffields: Punctuated<Field, Comma> = Punctuated::new();
-                    for mut field in fields.named {
-                        // See if this field has the attribute
-                        if let Some(filter) = remove_version_attr(&mut field.attrs)? {
-                            filter.verify(versions)?;
-                            if !filter.matches(versions, version) {
-                                // Don't add it!
-                                continue;
-                            }
-                        }
-                        ffields.push(field);
-                    }
-                    fields.named = ffields;
-                    Fields::Named(fields)
+                    // Add the whole thing
+                    brace_token.surround(&mut stream, |stream: &mut TokenStream2| stream.extend(children));
                 },
-                Fields::Unnamed(mut fields) => {
-                    let mut ffields: Punctuated<Field, Comma> = Punctuated::new();
-                    for mut field in fields.unnamed {
-                        // See if this field has the attribute
-                        if let Some(filter) = remove_version_attr(&mut field.attrs)? {
-                            filter.verify(versions)?;
-                            if !filter.matches(versions, version) {
-                                // Don't add it!
-                                continue;
-                            }
+                Fields::Unnamed(unnamed) => {
+                    // Serialize the field as a whole
+                    let FieldsUnnamed { unnamed, paren_token } = unnamed;
+                    let mut children: TokenStream2 = TokenStream2::new();
+                    for pair in unnamed.pairs() {
+                        // Only add filtered ones too
+                        let (field, comma): (&Field, Option<&Comma>) = pair.into_tuple();
+                        if let Some(stream) = generate_filtered_field(field, versions, version)? {
+                            children.extend(stream);
+                            children.extend(quote! { #comma });
                         }
-                        ffields.push(field);
                     }
-                    fields.unnamed = ffields;
-                    Fields::Unnamed(fields)
+                    // Add the whole thing
+                    paren_token.surround(&mut stream, |stream: &mut TokenStream2| stream.extend(children));
                 },
-
-                // Nothing to do here
-                Fields::Unit => Fields::Unit,
-            };
-
-            // Then serialize
-            Ok(Some(Item::Struct(s)))
-        },
-        Item::Union(mut u) => {
-            // Filter the union's fields
-            let mut ffields: Punctuated<Field, Comma> = Punctuated::new();
-            for mut field in u.fields.named {
-                // See if this field has the attribute
-                if let Some(filter) = remove_version_attr(&mut field.attrs)? {
-                    filter.verify(versions)?;
-                    if !filter.matches(versions, version) {
-                        // Don't add it!
-                        continue;
-                    }
-                }
-                ffields.push(field);
+                Fields::Unit => {},
             }
-            u.fields.named = ffields;
+            // Generate the remaining
+            stream.extend(quote! { #semi_token });
 
-            // Then serialize
-            Ok(Some(Item::Union(u)))
+            // OK, return
+            Ok(Some(stream))
         },
-        Item::Trait(mut t) => {
-            // Filter the trait's items
-            let mut fitems: Vec<TraitItem> = Vec::with_capacity(t.items.len());
-            for mut item in t.items {
-                // If the items have any attributes, see if it must be filtered
-                if let Some(attrs) = trait_item_attrs_mut(&mut item) {
-                    if let Some(filter) = remove_version_attr(attrs)? {
-                        filter.verify(versions)?;
-                        if !filter.matches(versions, version) {
-                            // Don't add it!
-                            continue;
-                        }
-                    }
-                }
-
-                // Otherwise, if we got here, keep it
-                fitems.push(item);
+        Item::Union(ItemUnion { attrs, vis, union_token, ident, generics, fields }) => {
+            // First, serialize the attributes
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            // Serialize the visibility
+            if force_public {
+                let vis: Visibility = Visibility::Public(Pub { span: vis.span() });
+                stream.extend(quote! { #vis });
+            } else {
+                stream.extend(quote! { #vis });
             }
-            t.items = fitems;
-
-            // OK, continue
-            Ok(Some(Item::Trait(t)))
-        },
-
-        Item::ForeignMod(mut f) => {
-            // Filter the nested items
-            let mut fitems: Vec<ForeignItem> = Vec::with_capacity(f.items.len());
-            for mut item in f.items {
-                // If the items have any attributes, see if it must be filtered
-                if let Some(attrs) = foreign_item_attrs_mut(&mut item) {
-                    if let Some(filter) = remove_version_attr(attrs)? {
-                        filter.verify(versions)?;
-                        if !filter.matches(versions, version) {
-                            // Don't add it!
-                            continue;
-                        }
-                    }
-                }
-
-                // Otherwise, if we got here, keep it
-                fitems.push(item);
-            }
-            f.items = fitems;
-
-            // OK, continue
-            Ok(Some(Item::ForeignMod(f)))
-        },
-        Item::Impl(mut i) => {
-            // Go over the nested items
-            let mut fitems: Vec<ImplItem> = Vec::new();
-            for mut item in i.items {
-                // Check if we want to keep this based on the item's attributes
-                let keep: bool = match &mut item {
-                    ImplItem::Const(ImplItemConst { attrs, .. })
-                    | ImplItem::Fn(ImplItemFn { attrs, .. })
-                    | ImplItem::Macro(ImplItemMacro { attrs, .. })
-                    | ImplItem::Type(ImplItemType { attrs, .. }) => {
-                        if let Some(filter) = remove_version_attr(attrs)? {
-                            filter.verify(versions)?;
-                            filter.matches(versions, version)
-                        } else {
-                            true
-                        }
-                    },
-
-                    // Rest is always kept
-                    other => panic!("Encountered unknown ImplItem variant '{other:?}'"),
-                };
-
-                // Then keep it if so
-                if keep {
-                    fitems.push(item);
+            // Serialize some other parts
+            stream.extend(quote! {
+                #union_token #ident #generics
+            });
+            // Serialize the named fields as a whole
+            let FieldsNamed { named, brace_token } = fields;
+            let mut children: TokenStream2 = TokenStream2::new();
+            for pair in named.pairs() {
+                // Only add filtered ones too
+                let (field, comma): (&Field, Option<&Comma>) = pair.into_tuple();
+                if let Some(stream) = generate_filtered_field(field, versions, version)? {
+                    children.extend(stream);
+                    children.extend(quote! { #comma });
                 }
             }
-            i.items = fitems;
+            // Add the whole thing
+            brace_token.surround(&mut stream, |stream: &mut TokenStream2| stream.extend(children));
 
-            // Jep, done here, serialize!
-            Ok(Some(Item::Impl(i)))
+            // Done!
+            Ok(Some(stream))
+        },
+        Item::Trait(ItemTrait {
+            attrs,
+            vis,
+            unsafety,
+            auto_token,
+            restriction,
+            trait_token,
+            ident,
+            generics,
+            colon_token,
+            supertraits,
+            brace_token,
+            items,
+        }) => {
+            // First, serialize the attributes
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            // Serialize the visibility
+            if force_public {
+                let vis: Visibility = Visibility::Public(Pub { span: vis.span() });
+                stream.extend(quote! { #vis });
+            } else {
+                stream.extend(quote! { #vis });
+            }
+            // Serialize some other parts
+            stream.extend(quote! { #unsafety #auto_token });
+            // Serialize the restriction(?)
+            if restriction.is_some() {
+                unimplemented!();
+            }
+            // Finally serialize 'trait ...'
+            stream.extend(quote! { #trait_token #ident #generics #colon_token #supertraits });
+            // Serialize the items in the trait
+            let mut children: TokenStream2 = TokenStream2::new();
+            for item in items {
+                // Only serialize those that match the filter test
+                if let Some(stream) = generate_filtered_trait_item(item, versions, version)? {
+                    children.extend(stream);
+                }
+            }
+            brace_token.surround(&mut stream, |stream: &mut TokenStream2| stream.extend(children));
+
+            // Done!
+            Ok(Some(stream))
         },
 
-        // The rest of the defined ones we just pass as-is...
-        item if matches!(item, Item::Const(_))
-            || matches!(item, Item::ExternCrate(_))
-            || matches!(item, Item::Fn(_))
-            || matches!(item, Item::Macro(_))
-            || matches!(item, Item::Static(_))
-            || matches!(item, Item::TraitAlias(_))
-            || matches!(item, Item::Type(_))
-            || matches!(item, Item::Use(_))
-            || matches!(item, Item::Verbatim(_)) =>
-        {
-            Ok(Some(item))
+        Item::ForeignMod(ItemForeignMod { attrs, unsafety, abi, brace_token, items }) => {
+            // Since it doesn't have visibility, error if we would be forced to update it
+            if force_public {
+                return Err(Diagnostic::spanned(
+                    item.span(),
+                    Level::Error,
+                    "Cannot use `#[versioning(...)]` on a foreign block; instead, wrap it in a module to decide internal visibility yourself".into(),
+                ));
+            }
+
+            // First, serialize the attributes
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            stream.extend(quote! {
+                #unsafety #abi
+            });
+            // Serialize the foreign items in the trait
+            let mut children: TokenStream2 = TokenStream2::new();
+            for item in items {
+                // Only serialize those that match the filter test
+                if let Some(stream) = generate_filtered_foreign_item(item, versions, version)? {
+                    children.extend(stream);
+                }
+            }
+            brace_token.surround(&mut stream, |stream: &mut TokenStream2| stream.extend(children));
+
+            // Done!
+            Ok(Some(stream))
         },
+        Item::Impl(ItemImpl { attrs, defaultness, unsafety, impl_token, generics, trait_, self_ty, brace_token, items }) => {
+            // Since it doesn't have visibility, error if we would be forced to update it
+            if force_public {
+                return Err(Diagnostic::spanned(
+                    item.span(),
+                    Level::Error,
+                    "Cannot use `#[versioning(...)]` on an impl block; instead, wrap it in a module to decide internal visibility yourself".into(),
+                ));
+            }
+
+            // Serialize as far as we can before it gets gnarly
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            stream.extend(quote! {
+                #defaultness #unsafety #impl_token #generics
+            });
+            // Serialize the 'for trait' part, if any
+            if let Some((not, name, for_token)) = trait_ {
+                stream.extend(quote! { #not #name #for_token });
+            }
+            // Serialize the type
+            stream.extend(quote! { #self_ty });
+            // Serialize the items
+            let mut children: TokenStream2 = TokenStream2::new();
+            for item in items {
+                // Keep only non-filtered items
+                if let Some(stream) = generate_filtered_impl_item(item, versions, version)? {
+                    children.extend(stream);
+                }
+            }
+            brace_token.surround(&mut stream, |stream: &mut TokenStream2| stream.extend(children));
+
+            // Done!
+            Ok(Some(stream))
+        },
+
+        // For these, just mod the visibility if told to do so
+        Item::Const(ItemConst { attrs, vis, const_token, ident, generics, colon_token, ty, eq_token, expr, semi_token }) => {
+            let vis: Cow<Visibility> = if force_public { Cow::Owned(Visibility::Public(Pub { span: vis.span() })) } else { Cow::Borrowed(vis) };
+            let mut stream = generate_attrs(attrs);
+            stream.extend(quote! {
+                #vis #const_token #ident #generics #colon_token #ty #eq_token #expr #semi_token
+            });
+            Ok(Some(stream))
+        },
+        Item::ExternCrate(ItemExternCrate { attrs, vis, extern_token, crate_token, ident, rename, semi_token }) => {
+            let vis: Cow<Visibility> = if force_public { Cow::Owned(Visibility::Public(Pub { span: vis.span() })) } else { Cow::Borrowed(vis) };
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            stream.extend(quote! {
+                #vis #extern_token #crate_token #ident
+            });
+            if let Some((as_token, name)) = rename {
+                stream.extend(quote! { #as_token, #name });
+            }
+            stream.extend(quote! { #semi_token });
+            Ok(Some(stream))
+        },
+        Item::Fn(ItemFn { attrs, vis, sig, block }) => {
+            // For now, function bodies are not yet nested
+            let vis: Cow<Visibility> = if force_public { Cow::Owned(Visibility::Public(Pub { span: vis.span() })) } else { Cow::Borrowed(vis) };
+            let mut stream = generate_attrs(attrs);
+            stream.extend(quote! {
+                #vis #sig #block
+            });
+            Ok(Some(stream))
+        },
+        Item::Macro(ItemMacro { attrs, ident, mac, semi_token }) => {
+            let mut stream: TokenStream2 = generate_attrs(attrs);
+            stream.extend(quote! { #ident #mac #semi_token });
+            Ok(Some(stream))
+        },
+        Item::Static(ItemStatic { attrs, vis, static_token, mutability, ident, colon_token, ty, eq_token, expr, semi_token }) => {
+            let vis: Cow<Visibility> = if force_public { Cow::Owned(Visibility::Public(Pub { span: vis.span() })) } else { Cow::Borrowed(vis) };
+            let mut stream = generate_attrs(attrs);
+            stream.extend(quote! {
+                #vis #static_token #mutability #ident #colon_token #ty #eq_token #expr #semi_token
+            });
+            Ok(Some(stream))
+        },
+        Item::TraitAlias(ItemTraitAlias { attrs, vis, trait_token, ident, generics, eq_token, bounds, semi_token }) => {
+            let vis: Cow<Visibility> = if force_public { Cow::Owned(Visibility::Public(Pub { span: vis.span() })) } else { Cow::Borrowed(vis) };
+            let mut stream = generate_attrs(attrs);
+            stream.extend(quote! {
+                #vis #trait_token #ident #generics #eq_token #bounds #semi_token
+            });
+            Ok(Some(stream))
+        },
+        Item::Type(ItemType { attrs, vis, type_token, ident, generics, eq_token, ty, semi_token }) => {
+            let vis: Cow<Visibility> = if force_public { Cow::Owned(Visibility::Public(Pub { span: vis.span() })) } else { Cow::Borrowed(vis) };
+            let mut stream = generate_attrs(attrs);
+            stream.extend(quote! {
+                #vis #type_token #ident #generics #eq_token #ty #semi_token
+            });
+            Ok(Some(stream))
+        },
+        Item::Use(ItemUse { attrs, vis, use_token, leading_colon, tree, semi_token }) => {
+            let vis: Cow<Visibility> = if force_public { Cow::Owned(Visibility::Public(Pub { span: vis.span() })) } else { Cow::Borrowed(vis) };
+            let mut stream = generate_attrs(attrs);
+            stream.extend(quote! {
+                #vis #use_token #leading_colon #tree #semi_token
+            });
+            Ok(Some(stream))
+        },
+
+        // These can be passed as-is
+        Item::Verbatim(v) => Ok(Some(quote! { #v })),
 
         // ...and undefined ones are errors, if ever
         other => panic!("Encountered unknown Item variant '{other:?}'"),
@@ -625,58 +988,38 @@ pub fn call(attrs: TokenStream2, input: TokenStream2) -> Result<TokenStream2, Di
     let mut impls: Vec<TokenStream2> = Vec::with_capacity(versions.0.len());
     for version in &versions.0 {
         // Collect the filtered version of the implementation
-        let mut item: Item = match filter_item(item.clone(), &versions, version)? {
+        let wrap_in_mod: bool = !matches!(item, Item::Mod(_)) || opts.nest_toplevel_modules;
+        let old_vis: Option<&Visibility> = item_vis(&item);
+        let mut stream: TokenStream2 = match generate_filtered_item(&item, &versions, version, true, wrap_in_mod)? {
             Some(item) => item,
             // Filtered out
             None => continue,
         };
 
-        // Update the toplevel item to be wrapped in a version thing
-        let item: Item = if matches!(item, Item::Mod(_)) && !opts.nest_toplevel_modules {
-            // Special case where the toplevel module is transformed instead of wrapped; so update the name and return
-            if let Item::Mod(mut m) = item {
-                m.ident = version.0.clone();
-                Item::Mod(m)
-            } else {
-                unreachable!();
-            }
-        } else {
-            // "Steal" the visibility of the wrapped item
-            let module_vis: Visibility = if let Some(vis) = item_vis_mut(&mut item) {
-                let old_vis: Visibility = vis.clone();
-                *vis = Visibility::Public(Pub { span: old_vis.span() });
-                old_vis
-            } else {
-                Visibility::Inherited
+        // If we are wrapping, then do so
+        if wrap_in_mod {
+            // Resolve the input
+            let ident: &Ident = &version.0;
+            let vis: Cow<Visibility> = if let Some(old_vis) = old_vis { Cow::Borrowed(old_vis) } else { Cow::Owned(Visibility::Inherited) };
+            // Wrap
+            stream = quote! {
+                #vis mod #ident {
+                    #stream
+                }
             };
-
-            // Wrap it in a new module
-            Item::Mod(ItemMod {
-                attrs: vec![],
-                vis: module_vis,
-                unsafety: None,
-                mod_token: Mod { span: Span::call_site() },
-                ident: version.0.clone(),
-                content: Some((Brace::default(), vec![item])),
-                semi: None,
-            })
-        };
+        }
 
         // Check if we need to inject the feature gate or not
-        let cfg: Option<TokenStream2> = if opts.features {
+        if opts.features {
             let feature: String = version.0.to_string();
-            Some(quote! {
+            stream = quote! {
                 #[cfg(feature = #feature)]
-            })
-        } else {
-            None
-        };
+                #stream
+            };
+        }
 
-        // Generate a module for this version
-        impls.push(quote! {
-            #cfg
-            #item
-        });
+        // Epic, store it!
+        impls.push(stream);
     }
 
     // Done

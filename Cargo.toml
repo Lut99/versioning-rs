@@ -1,6 +1,6 @@
 [package]
 name = "versioning"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "A (suite of) Rust procedural macro(s) that can be used to compile a schema- or specification-like struct to multiple versions of itself."
 authors = [ "Lut99" ]
