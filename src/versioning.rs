@@ -4,7 +4,7 @@
 //  Created:
 //    19 Nov 2023, 19:25:25
 //  Last edited:
-//    23 Dec 2023, 15:54:16
+//    23 Dec 2023, 16:03:00
 //  Auto updated?
 //    Yes
 //
@@ -24,7 +24,7 @@ use syn::{
     Attribute, Expr, ExprLit, Field, Fields, FieldsNamed, FieldsUnnamed, ForeignItem, ForeignItemFn, ForeignItemMacro, ForeignItemStatic,
     ForeignItemType, Ident, ImplItem, ImplItemConst, ImplItemFn, ImplItemMacro, ImplItemType, Item, ItemConst, ItemEnum, ItemExternCrate, ItemFn,
     ItemForeignMod, ItemImpl, ItemMacro, ItemMod, ItemStatic, ItemStruct, ItemTrait, ItemTraitAlias, ItemType, ItemUnion, ItemUse, Lit, LitBool,
-    Meta, TraitItem, TraitItemConst, TraitItemFn, TraitItemMacro, TraitItemType, Variant, Visibility,
+    Meta, TraitItem, TraitItemConst, TraitItemFn, TraitItemMacro, TraitItemType, Variant, Visibility, WhereClause,
 };
 
 // use crate::spec::BodyItem;
@@ -855,17 +855,17 @@ fn generate_filtered_item(
             }
 
             // Serialize as far as we can before it gets gnarly
-            let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
             let mut stream: TokenStream2 = generate_attrs(attrs);
             stream.extend(quote! {
-                #defaultness #unsafety #impl_token #impl_generics
+                #defaultness #unsafety #impl_token #generics
             });
             // Serialize the 'for trait' part, if any
             if let Some((not, name, for_token)) = trait_ {
                 stream.extend(quote! { #not #name #for_token });
             }
             // Serialize the type
-            stream.extend(quote! { #self_ty #ty_generics #where_clause });
+            let where_clause: &Option<WhereClause> = &generics.where_clause;
+            stream.extend(quote! { #self_ty #where_clause });
             // Serialize the items
             let mut children: TokenStream2 = TokenStream2::new();
             for item in items {
