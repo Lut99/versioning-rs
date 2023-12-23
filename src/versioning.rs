@@ -4,7 +4,7 @@
 //  Created:
 //    19 Nov 2023, 19:25:25
 //  Last edited:
-//    23 Dec 2023, 15:46:37
+//    23 Dec 2023, 15:54:16
 //  Auto updated?
 //    Yes
 //
@@ -855,16 +855,17 @@ fn generate_filtered_item(
             }
 
             // Serialize as far as we can before it gets gnarly
+            let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
             let mut stream: TokenStream2 = generate_attrs(attrs);
             stream.extend(quote! {
-                #defaultness #unsafety #impl_token #generics
+                #defaultness #unsafety #impl_token #impl_generics
             });
             // Serialize the 'for trait' part, if any
             if let Some((not, name, for_token)) = trait_ {
                 stream.extend(quote! { #not #name #for_token });
             }
             // Serialize the type
-            stream.extend(quote! { #self_ty });
+            stream.extend(quote! { #self_ty #ty_generics #where_clause });
             // Serialize the items
             let mut children: TokenStream2 = TokenStream2::new();
             for item in items {
